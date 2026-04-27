@@ -227,6 +227,10 @@ const targetOptions: Option[] = [
   { id: 'target-play', label: '继续陪我玩梗', value: '让我回过去以后，对方继续陪我玩梗，不要冷场。' },
   { id: 'target-group', label: '群里抢回气势', value: '让我回过去以后，在群里把气势抢回来。' },
   { id: 'target-soft', label: '高情商接住', value: '让我回过去以后，既接住对方又不把关系怼僵。' },
+  { id: 'target-flirt', label: '留一点暧昧钩子', value: '让我回过去以后，既能接住梗，又能留一点暧昧空间。' },
+  { id: 'target-explain', label: '逼对方主动解释', value: '让我回过去以后，把球踢回去，让对方主动解释或者接话。' },
+  { id: 'target-reverse', label: '把话题拉回我这边', value: '让我回过去以后，把注意力从对方那张图拉回到我这边。' },
+  { id: 'target-pressure', label: '不撕破脸但压回去', value: '让我回过去以后，不把关系弄僵，但气势要压回去。' },
 ]
 
 const focusOptions: Option[] = [
@@ -234,6 +238,12 @@ const focusOptions: Option[] = [
   { id: 'focus-clean', label: '有梗但别低俗', value: '怼人要有梗，但不能太脏。' },
   { id: 'focus-light', label: '轻一点别太冲', value: '轻松一点，别太上头，留点余地。' },
   { id: 'focus-qq', label: '适合 QQ 私聊', value: '要像 QQ 私聊里真的会发出去的话。' },
+  { id: 'focus-short', label: '短一点像秒回', value: '尽量短一点，像看到就秒回出去的话。' },
+  { id: 'focus-cold', label: '冷一点别太热情', value: '语气冷一点，别显得我太上赶着。' },
+  { id: 'focus-funny', label: '更好笑更有梗', value: '优先有梗和好笑，别太正经。' },
+  { id: 'focus-sweet', label: '嘴硬但保留甜味', value: '嘴上要硬一点，但还是保留一点亲近感。' },
+  { id: 'focus-group', label: '适合群聊发出去', value: '要像丢到群里也不会尴尬的话。' },
+  { id: 'focus-clean-cut', label: '干脆一点别废话', value: '别铺垫太多，直接干脆一点。' },
 ]
 
 const battleStyles: BattleStyle[] = [
@@ -332,7 +342,7 @@ function createLocalExperience(input: {
     : '这次重点追求“像真人、够专属、能继续聊”。'
   const uploadLine = input.imageName
     ? `已识别你上传的图片「${input.imageName}」，会优先结合实拍内容来组织回复。`
-    : `当前用的是「${scene.title}」示例场景。`
+    : `当前用的是「${scene.title}」这组内容气氛预设。`
   const threadLine = input.threadContext?.trim()
     ? `当前对话上下文是：“${input.threadContext.trim()}”。`
     : '当前默认把它当作刚发图后的第一轮回复。'
@@ -352,7 +362,7 @@ function createLocalExperience(input: {
     signal: `${scene.productFit}；${mode.angle ?? ''}`,
     visualSignal: input.imageName
       ? `这张图最值得被接住的是“${scene.cue}”这层氛围，系统会优先从主体、光线和情绪值里提炼回复切口。`
-      : `当前以「${scene.title}」示例画面做视觉理解，重点抓“${scene.cue}”和最容易让人想接话的细节。`,
+      : `当前以「${scene.title}」这组内容气氛做视觉理解，重点抓“${scene.cue}”和最容易让人想接话的细节。`,
     nextStep: input.desiredOutcome?.trim()
       ? `先把情绪接住，再通过一句追问把对话自然推进到“${input.desiredOutcome.trim()}”。`
       : '先用一句不敷衍的回应接住画面情绪，再留一个顺势续聊的切口。',
@@ -553,26 +563,55 @@ export default function App() {
 
   useEffect(() => {
     const controller = new AbortController()
+    let active = true
 
-    void fetch('/api/health', { signal: controller.signal })
-      .then(async (response) => {
+    const syncHealth = async (signal?: AbortSignal) => {
+      try {
+        const response = await fetch('/api/health', { signal })
+
         if (!response.ok) {
           throw new Error('health request failed')
         }
-        return response.json()
-      })
-      .then((payload: HealthState) => {
-        setHealth(payload)
-      })
-      .catch(() => {
+
+        const payload = (await response.json()) as HealthState
+
+        if (active) {
+          setHealth(payload)
+        }
+      } catch (error) {
+        if (!active || (error instanceof DOMException && error.name === 'AbortError')) {
+          return
+        }
+
         setHealth({
           ok: false,
           mode: 'unknown',
           message: '后端暂未连通，当前可先使用本地 fallback 演示。',
         })
-      })
+      }
+    }
 
-    return () => controller.abort()
+    const syncIfVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void syncHealth()
+      }
+    }
+
+    void syncHealth(controller.signal)
+
+    const intervalId = window.setInterval(syncIfVisible, 15000)
+    window.addEventListener('focus', syncIfVisible)
+    window.addEventListener('pageshow', syncIfVisible)
+    document.addEventListener('visibilitychange', syncIfVisible)
+
+    return () => {
+      active = false
+      controller.abort()
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', syncIfVisible)
+      window.removeEventListener('pageshow', syncIfVisible)
+      document.removeEventListener('visibilitychange', syncIfVisible)
+    }
   }, [])
 
   useEffect(() => {
@@ -928,7 +967,7 @@ export default function App() {
       addLog(
         imageName
           ? `> 已锁定敌方素材：${imageName}`
-          : `> 未上传真实图片，切换到演示目标：「${scene.title}」`,
+          : `> 未上传真实图片，切换到内容气氛预设：「${scene.title}」`,
         'info',
       )
       addLog(
@@ -1145,13 +1184,13 @@ export default function App() {
                   <div className="target-placeholder">
                     <UploadCloud size={30} />
                     <strong>点击上传聊天截图 / 表情包 / 图片</strong>
-                    <span>没有真实素材也能先用演示剧本跑完整条链路。</span>
+                    <span>没有真实素材也能先用内容气氛预设跑完整条链路。</span>
                   </div>
                 )}
               </label>
 
               <div className="target-meta">
-                <span>{imageName || `演示剧本：${scene.title}`}</span>
+                <span>{imageName || `内容气氛：${scene.title}`}</span>
                 <small>
                   {inputAnalysis
                     ? `${inputTypeLabels[inputAnalysis.inputType]} · ${inputAnalysis.subject}`
@@ -1212,7 +1251,7 @@ export default function App() {
                 </label>
 
                 <label>
-                  <span>演示剧本</span>
+                  <span>内容气氛</span>
                   <select value={sceneId} onChange={(event) => setSceneId(event.target.value)}>
                     {demoScenes.map((item) => (
                       <option key={item.id} value={item.id}>
@@ -1374,7 +1413,7 @@ export default function App() {
                   <div className="battle-canvas-empty">
                     <Sparkles size={34} />
                     <p>等待分析敌方火力...</p>
-                    <span>先上传图片，或者直接用左侧演示剧本打通整条链路。</span>
+                    <span>先上传图片，或者直接用左侧内容气氛预设打通整条链路。</span>
                   </div>
                 </div>
               ) : (

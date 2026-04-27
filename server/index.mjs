@@ -1734,6 +1734,7 @@ app.post('/api/battle/generate', async (request, response) => {
     })
   } catch (error) {
     console.error('battle generate failed', error)
+    const debugReason = error instanceof Error ? error.message : String(error)
 
     const battleOutput = buildFallbackBattleOutput(payload, fallback)
     const template = getMemeTemplate(battleOutput.memeTemplateId)
@@ -1756,6 +1757,7 @@ app.post('/api/battle/generate', async (request, response) => {
         memeGeneratorTemplate: getMemeGeneratorTemplate(battleOutput.memeGeneratorKey),
       },
       warning: 'battle_generation_failed_fallback_returned',
+      debugReason,
     })
   }
 })
