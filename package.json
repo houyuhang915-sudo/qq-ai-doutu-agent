@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
-    "server": "node server/index.mjs"
+    "server": "node --env-file=.env server/index.mjs"
   },
   "dependencies": {
     "@memecrafters/meme-generator": "^0.2.3",

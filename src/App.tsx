@@ -124,6 +124,19 @@ type BattleLog = {
   type: 'info' | 'system' | 'success' | 'warning'
 }
 
+type AgentSkill = {
+  id: string
+  label: string
+  stage: string
+  summary: string
+  tone: string
+  implementation?: string
+  source?: string
+  status?: string
+  fitStyles: string[]
+  fitInputs: InputAnalysis['inputType'][]
+}
+
 type SidebarTab = 'workbench' | 'library' | 'assets'
 
 const demoScenes: Scene[] = [
@@ -281,12 +294,7 @@ const battleStyles: BattleStyle[] = [
   },
 ]
 
-const pipelineStages = [
-  'VLM 感知',
-  '情感路由',
-  'LLM 配文',
-  '表情包匹配',
-]
+const pipelineStages = ['输入感知', '上下文记忆', '策略决策', '执行输出']
 
 const inputTypeLabels: Record<InputAnalysis['inputType'], string> = {
   chat_screenshot: '聊天截图',
@@ -323,12 +331,91 @@ function getBattleStyle(battleStyleId: string) {
   return battleStyles.find((item) => item.id === battleStyleId) ?? battleStyles[0]
 }
 
+function getOptionByValue(options: Option[], value: string, fallback: Option) {
+  return options.find((item) => item.value === value) ?? fallback
+}
+
+function getRecommendedSkills(skills: AgentSkill[], inputType: InputAnalysis['inputType'] | null, battleStyleId: string) {
+  const styleSkillByBattleStyle = {
+    sarcastic: 'sarcasm-composer',
+    aggressive: 'pressure-composer',
+    cute: 'cute-parry',
+    brainhole: 'brainhole-remix',
+  } as const
+
+  const candidateIds = [
+    'signal-reader',
+    'context-weaver',
+    styleSkillByBattleStyle[battleStyleId as keyof typeof styleSkillByBattleStyle] ?? 'sarcasm-composer',
+    'communication-craft',
+    inputType === 'chat_screenshot' || inputType === 'meme' || inputType === 'mixed' ? 'meme-dispatcher' : '',
+    'humanizer-polish',
+  ].filter(Boolean)
+
+  return candidateIds
+    .map((id) => skills.find((skill) => skill.id === id))
+    .filter((skill): skill is AgentSkill => Boolean(skill))
+    .filter(
+      (skill) =>
+        skill.fitStyles.includes(battleStyleId) &&
+        skill.fitInputs.includes(inputType ?? 'unknown'),
+    )
+}
+
+function sortSkillIds(ids: string[]) {
+  return [...ids].sort((left, right) => left.localeCompare(right))
+}
+
+function areSkillSetsEqual(left: string[], right: string[]) {
+  const leftSorted = sortSkillIds(left)
+  const rightSorted = sortSkillIds(right)
+
+  if (leftSorted.length !== rightSorted.length) {
+    return false
+  }
+
+  return leftSorted.every((item, index) => item === rightSorted[index])
+}
+
+function getAutoGoal(inputType: InputAnalysis['inputType'] | null, relationshipId: string) {
+  if (inputType === 'chat_screenshot') {
+    return relationshipId === 'crush'
+      ? targetOptions.find((item) => item.id === 'target-flirt') ?? targetOptions[1]
+      : targetOptions.find((item) => item.id === 'target-soft') ?? targetOptions[1]
+  }
+
+  if (inputType === 'meme') {
+    return relationshipId === 'bestie'
+      ? targetOptions.find((item) => item.id === 'target-play') ?? targetOptions[1]
+      : targetOptions.find((item) => item.id === 'target-pressure') ?? targetOptions[1]
+  }
+
+  return targetOptions[1]
+}
+
+function getAutoFocus(inputType: InputAnalysis['inputType'] | null, relationshipId: string) {
+  if (inputType === 'chat_screenshot') {
+    return relationshipId === 'crush'
+      ? focusOptions.find((item) => item.id === 'focus-sweet') ?? focusOptions[0]
+      : focusOptions.find((item) => item.id === 'focus-clean') ?? focusOptions[0]
+  }
+
+  if (inputType === 'meme') {
+    return relationshipId === 'bestie'
+      ? focusOptions.find((item) => item.id === 'focus-funny') ?? focusOptions[0]
+      : focusOptions.find((item) => item.id === 'focus-short') ?? focusOptions[0]
+  }
+
+  return focusOptions[0]
+}
+
 function createLocalExperience(input: {
   sceneId: string
   modeId: string
   contextId: string
   relationshipId: string
   focus: string
+  skillLabels?: string[]
   imageName?: string
   threadContext?: string
   desiredOutcome?: string
@@ -342,13 +429,16 @@ function createLocalExperience(input: {
     : '这次重点追求“像真人、够专属、能继续聊”。'
   const uploadLine = input.imageName
     ? `已识别你上传的图片「${input.imageName}」，会优先结合实拍内容来组织回复。`
-    : `当前用的是「${scene.title}」这组内容气氛预设。`
+    : `当前 Agent 先用「${scene.title}」这组默认语境预设完成判断。`
   const threadLine = input.threadContext?.trim()
     ? `当前对话上下文是：“${input.threadContext.trim()}”。`
     : '当前默认把它当作刚发图后的第一轮回复。'
   const outcomeLine = input.desiredOutcome?.trim()
     ? `这轮推进目标是：“${input.desiredOutcome.trim()}”。`
     : '这轮默认目标是先把气氛接住，再留下下一轮聊天空间。'
+  const skillLine = input.skillLabels?.length
+    ? `这轮额外装配了「${input.skillLabels.join(' / ')}」来收紧表达风格。`
+    : '当前先按 Agent 默认表达链路来组织回法。'
 
   const modeOpeners: Record<string, string> = {
     companion: '先稳稳接住情绪，再补一句让人觉得被认真看见的话。',
@@ -358,11 +448,11 @@ function createLocalExperience(input: {
   }
 
   return {
-    summary: `${uploadLine}${threadLine}${outcomeLine}${focusLine} 推荐采用「${mode.label}」，因为这张图的核心气质是“${scene.cue}”，最适合在 ${context.label} 里做有记忆点的专属回复。`,
+    summary: `${uploadLine}${threadLine}${outcomeLine}${focusLine}${skillLine} 推荐采用「${mode.label}」，因为这张图的核心气质是“${scene.cue}”，最适合在 ${context.label} 里做有记忆点的专属回复。`,
     signal: `${scene.productFit}；${mode.angle ?? ''}`,
     visualSignal: input.imageName
       ? `这张图最值得被接住的是“${scene.cue}”这层氛围，系统会优先从主体、光线和情绪值里提炼回复切口。`
-      : `当前以「${scene.title}」这组内容气氛做视觉理解，重点抓“${scene.cue}”和最容易让人想接话的细节。`,
+      : `当前以「${scene.title}」这组默认语境做视觉理解，重点抓“${scene.cue}”和最容易让人想接话的细节。`,
     nextStep: input.desiredOutcome?.trim()
       ? `先把情绪接住，再通过一句追问把对话自然推进到“${input.desiredOutcome.trim()}”。`
       : '先用一句不敷衍的回应接住画面情绪，再留一个顺势续聊的切口。',
@@ -403,6 +493,7 @@ function createLocalExperience(input: {
       input.desiredOutcome?.trim()
         ? `推进目标：${input.desiredOutcome.trim()}。生成结果会围绕这个目标做连续互动编排。`
         : 'AI 输出形态：推荐回复表情包 + 文案回复卡 + 下一轮追问建议，形成连续互动。',
+      input.skillLabels?.length ? `能力装配：${input.skillLabels.join(' / ')}。当前回复会围绕这组表达 Skill 来做风格收束。` : '能力装配：默认 Agent 表达链路。后续可继续接入更多技能插件。',
     ],
   } satisfies Experience
 }
@@ -485,6 +576,12 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState('')
   const [battleTelemetry, setBattleTelemetry] = useState<BattleTelemetry | null>(null)
   const [activeSidebarTab, setActiveSidebarTab] = useState<SidebarTab>('workbench')
+  const [showManualTuning, setShowManualTuning] = useState(false)
+  const [styleTouchedManually, setStyleTouchedManually] = useState(false)
+  const [goalTouchedManually, setGoalTouchedManually] = useState(false)
+  const [focusTouchedManually, setFocusTouchedManually] = useState(false)
+  const [skillTouchedManually, setSkillTouchedManually] = useState(false)
+  const [availableSkills, setAvailableSkills] = useState<AgentSkill[]>([])
   const [health, setHealth] = useState<HealthState>({
     ok: false,
     mode: 'unknown',
@@ -508,6 +605,71 @@ export default function App() {
   const context = getContext(contextId)
   const relationship = getRelationship(relationshipId)
   const battleMode = getMode(battleStyle.modeId)
+  const targetOption = getOptionByValue(targetOptions, desiredOutcome, targetOptions[1])
+  const focusOption = getOptionByValue(focusOptions, focus, focusOptions[0])
+  const recommendedStyle = inputAnalysis?.suggestedBattleStyleId
+    ? getBattleStyle(inputAnalysis.suggestedBattleStyleId)
+    : battleStyle
+  const recommendedMode = getMode(recommendedStyle.modeId)
+  const recommendedGoal = inputAnalysis
+    ? getAutoGoal(inputAnalysis.inputType, relationship.id)
+    : targetOption
+  const recommendedFocus = inputAnalysis
+    ? getAutoFocus(inputAnalysis.inputType, relationship.id)
+    : focusOption
+  const styleOverrideActive = recommendedStyle.id !== battleStyle.id
+  const goalOverrideActive = recommendedGoal.value !== desiredOutcome
+  const focusOverrideActive = recommendedFocus.value !== focus
+  const recommendedSkills = getRecommendedSkills(availableSkills, inputAnalysis?.inputType ?? null, recommendedStyle.id)
+  const recommendedSkillIds = recommendedSkills.map((skill) => skill.id)
+  const recommendedSkillSignature = recommendedSkillIds.join('|')
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(() =>
+    recommendedSkillIds,
+  )
+  const activeSkills = availableSkills.filter((skill) => selectedSkillIds.includes(skill.id))
+  const skillOverrideActive = !areSkillSetsEqual(
+    selectedSkillIds,
+    recommendedSkillIds,
+  )
+  const agentDecisionSummary =
+    inputAnalysis?.inputType === 'chat_screenshot'
+      ? '先读聊天上下文，再决定回击力度和接话方向。'
+      : inputAnalysis?.inputType === 'meme'
+        ? '先识别梗感和挑衅信号，再从回复表情包库里选最合适的回法。'
+        : imageDataUrl
+          ? '先看画面主体和情绪温度，再决定更适合回文案还是回图。'
+          : `当前先按「${scene.title}」这组默认语境启动 Agent 判断。`
+  const agentReasonTags =
+    inputAnalysis?.emotionTags?.length
+      ? inputAnalysis.emotionTags.join(' / ')
+      : `${scene.mood} / ${scene.cue}`
+  const agentPlanCards = [
+    {
+      label: '输入判断',
+      value: inputAnalysis ? inputTypeLabels[inputAnalysis.inputType] : '默认语境预设',
+      note: inputAnalysis?.subject || scene.title,
+    },
+    {
+      label: '推荐策略',
+      value: recommendedStyle.name,
+      note: `${recommendedMode.label} · ${styleOverrideActive ? '当前已被你手动覆盖' : '当前正在采用'}`,
+    },
+    {
+      label: '本轮目标',
+      value: recommendedGoal.label,
+      note: `${recommendedGoal.value || '先接住，再推进下一轮互动。'}${goalOverrideActive ? ' · 当前已被你手动改写' : ''}`,
+    },
+    {
+      label: '语气边界',
+      value: recommendedFocus.label,
+      note: `${recommendedFocus.value || '像真人、够自然、可直接发出去。'}${focusOverrideActive ? ' · 当前已被你手动改写' : ''}`,
+    },
+  ]
+  const skillRouterSummary = activeSkills.length
+    ? `当前 Agent 已装配 ${activeSkills.map((skill) => skill.label.replace(' Skill', '')).join(' / ')}`
+    : recommendedSkills.length
+      ? '你可以保留 Agent 推荐技能，也可以手动替换当前的表达能力装配。'
+      : '当前还没有足够输入信号来装配表达 Skill。'
   const memeCaption = selectedReply || experience.quickReplies[0] || '装得挺像，继续。'
   const detectedOpponentLine =
     inputAnalysis?.lastOpponentMessage || threadContext || ''
@@ -591,13 +753,37 @@ export default function App() {
       }
     }
 
+    const syncSkills = async (signal?: AbortSignal) => {
+      try {
+        const response = await fetch('/api/agent/skills', { signal })
+
+        if (!response.ok) {
+          throw new Error('skills request failed')
+        }
+
+        const payload = (await response.json()) as { ok: boolean; skills?: AgentSkill[] }
+
+        if (active) {
+          setAvailableSkills(Array.isArray(payload.skills) ? payload.skills : [])
+        }
+      } catch (error) {
+        if (!active || (error instanceof DOMException && error.name === 'AbortError')) {
+          return
+        }
+
+        setAvailableSkills([])
+      }
+    }
+
     const syncIfVisible = () => {
       if (document.visibilityState === 'visible') {
         void syncHealth()
+        void syncSkills()
       }
     }
 
     void syncHealth(controller.signal)
+    void syncSkills(controller.signal)
 
     const intervalId = window.setInterval(syncIfVisible, 15000)
     window.addEventListener('focus', syncIfVisible)
@@ -645,6 +831,41 @@ export default function App() {
       return experience.quickReplies[0] ?? ''
     })
   }, [experience])
+
+  useEffect(() => {
+    if (!inputAnalysis) {
+      return
+    }
+
+    if (!styleTouchedManually) {
+      setBattleStyleId(recommendedStyle.id)
+    }
+
+    if (!goalTouchedManually) {
+      setDesiredOutcome(recommendedGoal.value ?? targetOptions[1].value ?? '')
+    }
+
+    if (!focusTouchedManually) {
+      setFocus(recommendedFocus.value ?? focusOptions[0].value ?? '')
+    }
+
+  }, [
+    focusTouchedManually,
+    goalTouchedManually,
+    inputAnalysis,
+    recommendedFocus,
+    recommendedGoal,
+    recommendedStyle,
+    styleTouchedManually,
+  ])
+
+  useEffect(() => {
+    if (!skillTouchedManually) {
+      setSelectedSkillIds((current) =>
+        areSkillSetsEqual(current, recommendedSkillIds) ? current : recommendedSkillIds,
+      )
+    }
+  }, [recommendedSkillIds, recommendedSkillSignature, skillTouchedManually])
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -783,6 +1004,10 @@ export default function App() {
       const payload = await analyzeUploadedInput(optimized.uploadUrl, file.name)
       const analysis = payload.analysis
       setInputAnalysis(analysis)
+      setStyleTouchedManually(false)
+      setGoalTouchedManually(false)
+      setFocusTouchedManually(false)
+      setSkillTouchedManually(false)
       setThreadContext(analysis.inputType === 'chat_screenshot' ? analysis.lastOpponentMessage || analysis.threadContextSuggestion || '' : '')
       setToastMessage(
         analysis.inputType === 'chat_screenshot'
@@ -816,6 +1041,10 @@ export default function App() {
     setImageDataUrl('')
     setImageName('')
     setInputAnalysis(null)
+    setStyleTouchedManually(false)
+    setGoalTouchedManually(false)
+    setFocusTouchedManually(false)
+    setSkillTouchedManually(false)
     setBattleTelemetry(null)
     setHasGenerated(false)
     setLogs([])
@@ -903,6 +1132,20 @@ export default function App() {
     )
   }
 
+  function toggleSkill(skillId: string) {
+    setSkillTouchedManually(true)
+    setSelectedSkillIds((current) => {
+      if (current.includes(skillId)) {
+        if (current.length === 1) {
+          return current
+        }
+        return current.filter((item) => item !== skillId)
+      }
+
+      return [...current, skillId]
+    })
+  }
+
   async function handleGenerate() {
     setIsGenerating(true)
     setHasGenerated(false)
@@ -916,6 +1159,7 @@ export default function App() {
       contextId,
       relationshipId,
       focus,
+      skillLabels: activeSkills.map((skill) => skill.label.replace(' Skill', '')),
       imageName,
       threadContext,
       desiredOutcome,
@@ -935,6 +1179,8 @@ export default function App() {
         contextId,
         relationshipId,
         focus,
+        selectedSkillIds,
+        selectedSkillLabels: activeSkills.map((skill) => skill.label),
         imageDataUrl,
         imageName,
         inputAnalysis,
@@ -967,7 +1213,7 @@ export default function App() {
       addLog(
         imageName
           ? `> 已锁定敌方素材：${imageName}`
-          : `> 未上传真实图片，切换到内容气氛预设：「${scene.title}」`,
+          : `> 未上传真实图片，切换到 Agent 默认语境：「${scene.title}」`,
         'info',
       )
       addLog(
@@ -985,6 +1231,13 @@ export default function App() {
       addLog('[Emotion Router] 情绪与挑衅指数分析启动', 'system')
       addLog(`> 检测到高频标签：${scene.mood} / 挑衅倾向 / 可玩梗空间`, 'warning')
       addLog(`> 已切换【${battleStyle.name}】反击战术`, 'info')
+      addLog('[Skill Router] 正在装配表达能力...', 'system')
+      addLog(
+        activeSkills.length
+          ? `> 已加载：${activeSkills.map((skill) => skill.label.replace(' Skill', '')).join(' / ')}${skillOverrideActive ? '（含人工改写）' : ''}`
+          : '> 当前未识别到可装配的表达 Skill，先按默认链路执行。',
+        'success',
+      )
 
       setGenerationStep(3)
       await sleep(560)
@@ -1131,8 +1384,8 @@ export default function App() {
             <div className="battle-title-row">
               <BrainCircuit size={22} />
               <div>
-                <h1>AI 嘴替 / 社交斗图 Agent 工作台</h1>
-                <p>VLM + Emotion Router + LLM + Meme Selector</p>
+                <h1>AI 社交互动 Agent 原型</h1>
+                <p>Perception · Memory · Planning · Action</p>
               </div>
             </div>
           </div>
@@ -1162,9 +1415,9 @@ export default function App() {
               <div className="battle-panel-heading">
                 <h2>
                   <span className="battle-dot is-danger" />
-                  敌方火力输入
+                  多模态输入
                 </h2>
-                <p>支持聊天截图、表情包、普通图片，先识别再决定怎么回。</p>
+                <p>支持聊天截图、表情包、普通图片。Agent 会先识别输入，再决定怎么回。</p>
               </div>
 
               <label className={`target-dropzone ${imageDataUrl ? 'has-image' : ''}`}>
@@ -1184,13 +1437,13 @@ export default function App() {
                   <div className="target-placeholder">
                     <UploadCloud size={30} />
                     <strong>点击上传聊天截图 / 表情包 / 图片</strong>
-                    <span>没有真实素材也能先用内容气氛预设跑完整条链路。</span>
+                    <span>没有真实素材也能先用默认语境预设演示整条 Agent 链路。</span>
                   </div>
                 )}
               </label>
 
               <div className="target-meta">
-                <span>{imageName || `内容气氛：${scene.title}`}</span>
+                <span>{imageName || `默认语境：${scene.title}`}</span>
                 <small>
                   {inputAnalysis
                     ? `${inputTypeLabels[inputAnalysis.inputType]} · ${inputAnalysis.subject}`
@@ -1205,122 +1458,215 @@ export default function App() {
               <div className="battle-panel-heading">
                 <h2>
                   <Swords size={15} />
-                  反击战术设定
+                  Agent 决策面板
                 </h2>
-                <p>先决定回击人格，再让模型代你出手。</p>
+                <p>Agent 先自动判断，再允许你做少量人工微调。</p>
               </div>
 
-              <div className="tactic-grid">
-                {battleStyles.map((style) => (
-                  <button
-                    key={style.id}
-                    type="button"
-                    className={`tactic-card ${style.id === battleStyleId ? 'is-selected' : ''}`}
-                    onClick={() => setBattleStyleId(style.id)}
-                  >
-                    <div className="tactic-card-title">
-                      <span>{style.icon}</span>
-                      <strong>{style.name}</strong>
-                    </div>
-                    <p>{style.description}</p>
-                  </button>
+              <div className="agent-plan-grid">
+                {agentPlanCards.map((card) => (
+                  <article key={card.label} className="agent-plan-card">
+                    <span>{card.label}</span>
+                    <strong>{card.value}</strong>
+                    <p>{card.note}</p>
+                  </article>
                 ))}
               </div>
 
-              <div className="battle-config-grid">
-                <label>
-                  <span>战场入口</span>
-                  <select value={contextId} onChange={(event) => setContextId(event.target.value)}>
-                    {contexts.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label>
-                  <span>关系距离</span>
-                  <select value={relationshipId} onChange={(event) => setRelationshipId(event.target.value)}>
-                    {relationships.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label>
-                  <span>内容气氛</span>
-                  <select value={sceneId} onChange={(event) => setSceneId(event.target.value)}>
-                    {demoScenes.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.title}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label>
-                  <span>底层策略</span>
-                  <div className="readonly-pill">{battleMode.label}</div>
-                </label>
+              <div className="agent-decision-callout">
+                <div>
+                  <span className="micro-label">Agent Auto Decision</span>
+                  <h3>{agentDecisionSummary}</h3>
+                  <p>当前关键判断信号：{agentReasonTags}</p>
+                </div>
+                {styleOverrideActive ? (
+                  <button
+                    type="button"
+                    className="ghost-action"
+                    onClick={() => {
+                      setStyleTouchedManually(false)
+                      setBattleStyleId(recommendedStyle.id)
+                    }}
+                  >
+                    改回 Agent 推荐人格
+                  </button>
+                ) : null}
               </div>
 
-              <div className="battle-notes">
-                <label>
-                  <span>上一轮对话（支持自动回填）</span>
-                  <textarea
-                    value={threadContext}
-                    onChange={(event) => setThreadContext(event.target.value)}
-                    placeholder="比如：对方先发了什么、有没有明显挑衅。"
-                  />
-                  <small className="battle-note-meta">
-                    {isAnalyzingInput
-                      ? 'AI 正在从截图里抽取对方最后一轮消息。'
-                      : inputAnalysis?.lastOpponentMessage
-                        ? `AI 已识别：${inputAnalysis.lastOpponentMessage}`
-                        : '上传聊天截图后，这里会自动回填对方最后一轮可读消息。'}
-                  </small>
-                </label>
-
-                <label>
-                  <span>出手目标</span>
-                  <select
-                    value={desiredOutcome}
-                    onChange={(event) => setDesiredOutcome(event.target.value)}
+              <div className="skill-slot-toolbar">
+                <div>
+                  <span className="micro-label">Skill Loadout</span>
+                  <strong>{activeSkills.length ? `${activeSkills.length} 个表达 Skill 已装配` : '等待装配表达 Skill'}</strong>
+                  <p>后面接真实 skill 时，这里就是 Agent 的能力槽位入口。</p>
+                </div>
+                {skillOverrideActive ? (
+                  <button
+                    type="button"
+                    className="ghost-action"
+                    onClick={() => {
+                      setSkillTouchedManually(false)
+                      setSelectedSkillIds(recommendedSkillIds)
+                    }}
                   >
-                    {targetOptions.map((item) => (
-                      <option key={item.id} value={item.value}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label>
-                  <span>语气限制</span>
-                  <select
-                    value={focus}
-                    onChange={(event) => setFocus(event.target.value)}
-                  >
-                    {focusOptions.map((item) => (
-                      <option key={item.id} value={item.value}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    改回 Agent 推荐技能
+                  </button>
+                ) : null}
               </div>
+
+              <div className="skill-loadout">
+                {recommendedSkills.map((skill) => {
+                  const isSelected = selectedSkillIds.includes(skill.id)
+
+                  return (
+                    <button
+                      key={skill.id}
+                      type="button"
+                      className={`skill-chip ${isSelected ? 'is-active' : ''}`}
+                      onClick={() => toggleSkill(skill.id)}
+                    >
+                      <span>{skill.stage}</span>
+                      <strong>{skill.label.replace(' Skill', '')}</strong>
+                      <small>{skill.tone}</small>
+                    </button>
+                  )
+                })}
+              </div>
+
+              <div className="panel-divider">
+                <span>人工微调（可选）</span>
+                <button
+                  type="button"
+                  className="panel-toggle"
+                  onClick={() => setShowManualTuning((current) => !current)}
+                >
+                  {showManualTuning ? '收起人工微调' : '展开人工微调'}
+                </button>
+              </div>
+
+              {showManualTuning ? (
+                <>
+                  <div className="tactic-grid">
+                    {battleStyles.map((style) => (
+                      <button
+                        key={style.id}
+                        type="button"
+                        className={`tactic-card ${style.id === battleStyleId ? 'is-selected' : ''}`}
+                        onClick={() => {
+                          setStyleTouchedManually(true)
+                          setBattleStyleId(style.id)
+                        }}
+                      >
+                        <div className="tactic-card-title">
+                          <span>{style.icon}</span>
+                          <strong>{style.name}</strong>
+                        </div>
+                        <p>{style.description}</p>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="battle-config-grid">
+                    <label>
+                      <span>战场入口</span>
+                      <select value={contextId} onChange={(event) => setContextId(event.target.value)}>
+                        {contexts.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>关系距离</span>
+                      <select value={relationshipId} onChange={(event) => setRelationshipId(event.target.value)}>
+                        {relationships.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>默认语境</span>
+                      <select value={sceneId} onChange={(event) => setSceneId(event.target.value)}>
+                        {demoScenes.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.title}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>底层策略</span>
+                      <div className="readonly-pill">{battleMode.label}</div>
+                    </label>
+                  </div>
+
+                  <div className="battle-notes">
+                    <label>
+                      <span>对话记忆（支持自动回填）</span>
+                      <textarea
+                        value={threadContext}
+                        onChange={(event) => setThreadContext(event.target.value)}
+                        placeholder="比如：对方先发了什么、有没有明显挑衅。"
+                      />
+                      <small className="battle-note-meta">
+                        {isAnalyzingInput
+                          ? 'AI 正在从截图里抽取对方最后一轮消息。'
+                          : inputAnalysis?.lastOpponentMessage
+                            ? `AI 已识别：${inputAnalysis.lastOpponentMessage}`
+                            : '上传聊天截图后，这里会自动回填对方最后一轮可读消息。'}
+                      </small>
+                    </label>
+
+                    <label>
+                      <span>Agent 目标</span>
+                      <select
+                        value={desiredOutcome}
+                        onChange={(event) => {
+                          setGoalTouchedManually(true)
+                          setDesiredOutcome(event.target.value)
+                        }}
+                      >
+                        {targetOptions.map((item) => (
+                          <option key={item.id} value={item.value}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>语气边界</span>
+                      <select
+                        value={focus}
+                        onChange={(event) => {
+                          setFocusTouchedManually(true)
+                          setFocus(event.target.value)
+                        }}
+                      >
+                        {focusOptions.map((item) => (
+                          <option key={item.id} value={item.value}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </>
+              ) : null}
             </article>
 
             <article className="battle-panel terminal-shell">
               <div className="battle-panel-heading terminal-heading">
                 <h2>
                   <Terminal size={15} />
-                  Agent Execution Log
+                  Agent 决策轨迹
                 </h2>
-                <p>这里展示整条嘴替推理链路。</p>
+                <p>这里展示 Agent 从识别到执行的整条动作链。</p>
               </div>
 
               <div className="terminal-screen">
@@ -1342,17 +1688,17 @@ export default function App() {
               {isGenerating ? (
                 <>
                   <Loader2 size={18} className="spin" />
-                  AI 解析计算中...
+                  Agent 正在执行...
                 </>
               ) : isAnalyzingInput ? (
                 <>
                   <Loader2 size={18} className="spin" />
-                  正在分析上传内容...
+                  Agent 正在分析输入...
                 </>
               ) : (
                 <>
                   <Zap size={18} />
-                  一键智能反击
+                  让 Agent 出手
                 </>
               )}
             </button>
@@ -1394,7 +1740,7 @@ export default function App() {
               <div className="render-panel-head">
                 <div>
                   <span className="micro-label">Battle Output</span>
-                  <h3>AI 生成的专属斗图弹药</h3>
+                  <h3>Agent 执行动作</h3>
                 </div>
 
                 <div className="render-meta">
@@ -1413,7 +1759,7 @@ export default function App() {
                   <div className="battle-canvas-empty">
                     <Sparkles size={34} />
                     <p>等待分析敌方火力...</p>
-                    <span>先上传图片，或者直接用左侧内容气氛预设打通整条链路。</span>
+                    <span>先上传图片，或者直接用左侧默认语境预设打通整条 Agent 链路。</span>
                   </div>
                 </div>
               ) : (
@@ -1461,15 +1807,36 @@ export default function App() {
 
             <div className="battle-info-grid">
               <article className="battle-panel intel-card">
-                <span className="micro-label">Threat Reading</span>
-                <h4>画面解读</h4>
+                <span className="micro-label">Input Reading</span>
+                <h4>输入理解</h4>
                 <p>{inputAnalysis?.visualSummary || experience.visualSignal}</p>
               </article>
 
               <article className="battle-panel intel-card">
-                <span className="micro-label">Counter Route</span>
-                <h4>反击判断</h4>
+                <span className="micro-label">Strategy Route</span>
+                <h4>策略理由</h4>
                 <p>{battleTelemetry?.attackVector || experience.signal}</p>
+              </article>
+
+              <article className="battle-panel intel-card full-width">
+                <div className="intel-card-head">
+                  <div>
+                    <span className="micro-label">Skill Router</span>
+                    <h4>能力装配</h4>
+                  </div>
+                  <small>{skillRouterSummary}</small>
+                </div>
+
+                <div className="skill-shelf">
+                  {activeSkills.map((skill) => (
+                    <article key={skill.id} className="skill-card is-selected">
+                      <span>{skill.stage}</span>
+                      <strong>{skill.label}</strong>
+                      <p>{skill.summary}</p>
+                      <small>{skill.tone}</small>
+                    </article>
+                  ))}
+                </div>
               </article>
 
               <article
@@ -1497,8 +1864,8 @@ export default function App() {
               <article className="battle-panel intel-card full-width">
                 <div className="intel-card-head">
                   <div>
-                    <span className="micro-label">Ammo Pack</span>
-                    <h4>可直接发回去的嘴替文案</h4>
+                    <span className="micro-label">Agent Reply Pack</span>
+                    <h4>可直接执行的回复方案</h4>
                   </div>
                   <small>点一下就复制，不会刷新页面。</small>
                 </div>
@@ -1533,7 +1900,7 @@ export default function App() {
               <article className="battle-panel intel-card full-width">
                 <div className="intel-card-head">
                   <div>
-                    <span className="micro-label">Chat Preview</span>
+                    <span className="micro-label">Action Preview</span>
                     <h4>模拟聊天框</h4>
                   </div>
                   <small>
@@ -1574,10 +1941,10 @@ export default function App() {
               <article className="battle-panel intel-card full-width">
                 <div className="intel-card-head">
                   <div>
-                    <span className="micro-label">Launch Plan</span>
-                    <h4>落地动作</h4>
+                    <span className="micro-label">Agent Expansion</span>
+                    <h4>后续落地路线</h4>
                   </div>
-                  <small>从比赛 Demo 走向真实产品能力。</small>
+                  <small>从原型演示走向真实社交助手。</small>
                 </div>
 
                 <div className="launch-checklist">

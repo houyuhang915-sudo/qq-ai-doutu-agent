@@ -3,6 +3,13 @@ import {
   Resources as MemeResources,
   getMeme as getGeneratedMeme,
 } from '@memecrafters/meme-generator'
+import { execFile as execFileCallback } from 'node:child_process'
+import { promisify } from 'node:util'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+
+const execFile = promisify(execFileCallback)
 
 const app = express()
 const host = '127.0.0.1'
@@ -106,6 +113,99 @@ const relationships = [
   { id: 'crush', label: '暧昧对象', value: '要有专属感，但不能油和冒犯' },
   { id: 'fandom', label: '兴趣搭子', value: '要体现“我懂你这张图的点在哪”' },
   { id: 'new-friend', label: '新认识的人', value: '要友好、有分寸，并给对方继续聊的空间' },
+]
+
+const agentSkills = [
+  {
+    id: 'signal-reader',
+    label: '视觉信号读取 Skill',
+    stage: '输入感知',
+    tone: '稳定读图',
+    effect: '优先把图片主体、动作、字幕、情绪温度提炼成可路由的社交信号，避免回复空泛。',
+    implementation: 'analysis',
+    fitStyles: ['sarcastic', 'aggressive', 'cute', 'brainhole'],
+    fitInputs: ['chat_screenshot', 'meme', 'photo', 'mixed', 'unknown'],
+  },
+  {
+    id: 'context-weaver',
+    label: '上下文织网 Skill',
+    stage: '上下文记忆',
+    tone: '补全语境',
+    effect: '优先结合上一轮对话、关系距离和战场入口，让回复像接着聊，而不是凭空生成。',
+    implementation: 'prompt',
+    fitStyles: ['sarcastic', 'aggressive', 'cute', 'brainhole'],
+    fitInputs: ['chat_screenshot', 'meme', 'photo', 'mixed', 'unknown'],
+  },
+  {
+    id: 'sarcasm-composer',
+    label: '阴阳表达 Skill',
+    stage: '策略决策',
+    tone: '阴阳怪气',
+    effect: '把表面夸奖、实际带刺的语气组织成像真人会发的短句，重点是笑里藏刀。',
+    implementation: 'prompt',
+    fitStyles: ['sarcastic'],
+    fitInputs: ['chat_screenshot', 'meme', 'mixed', 'unknown'],
+  },
+  {
+    id: 'pressure-composer',
+    label: '压迫回怼 Skill',
+    stage: '策略决策',
+    tone: '霸道回怼',
+    effect: '让回复更短、更硬、更有压迫感，适合挑衅值高和明显炫耀的场景。',
+    implementation: 'prompt',
+    fitStyles: ['aggressive'],
+    fitInputs: ['chat_screenshot', 'meme', 'mixed'],
+  },
+  {
+    id: 'cute-parry',
+    label: '卖萌反弹 Skill',
+    stage: '策略决策',
+    tone: '委屈巴巴',
+    effect: '用装无辜、卖萌和轻反差的方式把气势弹回去，适合不想把关系怼僵的回法。',
+    implementation: 'prompt',
+    fitStyles: ['cute'],
+    fitInputs: ['chat_screenshot', 'meme', 'photo', 'mixed'],
+  },
+  {
+    id: 'brainhole-remix',
+    label: '脑洞玩梗 Skill',
+    stage: '策略决策',
+    tone: '离谱脑洞',
+    effect: '把输入里的攻击点改写成离谱但好玩的梗，优先让回复更有传播感和记忆点。',
+    implementation: 'prompt',
+    fitStyles: ['brainhole'],
+    fitInputs: ['meme', 'photo', 'mixed', 'unknown'],
+  },
+  {
+    id: 'communication-craft',
+    label: '深听回应 Skill',
+    stage: '策略决策',
+    tone: '深听回应',
+    effect: '先识别潜台词、关系温度和对方真正想要的回应，再决定回法结构和推进方式。',
+    implementation: 'prompt',
+    fitStyles: ['sarcastic', 'aggressive', 'cute', 'brainhole'],
+    fitInputs: ['chat_screenshot', 'meme', 'photo', 'mixed', 'unknown'],
+  },
+  {
+    id: 'meme-dispatcher',
+    label: '表情包分发 Skill',
+    stage: '执行输出',
+    tone: '回图执行',
+    effect: '优先从回复表情包库里挑最贴语境的反应图，再和嘴替文案一起打包输出。',
+    implementation: 'selector',
+    fitStyles: ['sarcastic', 'aggressive', 'cute', 'brainhole'],
+    fitInputs: ['chat_screenshot', 'meme', 'photo', 'mixed', 'unknown'],
+  },
+  {
+    id: 'humanizer-polish',
+    label: '人味润色 Skill',
+    stage: '执行输出',
+    tone: '去 AI 味',
+    effect: '在结果发出去前再做一层去 AI 味润色，让回复更像真人秒回，而不是模型写作腔。',
+    implementation: 'postprocess',
+    fitStyles: ['sarcastic', 'aggressive', 'cute', 'brainhole'],
+    fitInputs: ['chat_screenshot', 'meme', 'photo', 'mixed', 'unknown'],
+  },
 ]
 
 const memeGeneratorTemplates = [
@@ -417,6 +517,132 @@ function pickFallbackMemeGeneratorTemplate(inputType, battleStyleId) {
   return memeGeneratorTemplates[seedIndex(battleStyleId, memeGeneratorTemplates.length)]
 }
 
+function getRecommendedSkills(inputType, battleStyleId) {
+  const styleSkillByBattleStyle = {
+    sarcastic: 'sarcasm-composer',
+    aggressive: 'pressure-composer',
+    cute: 'cute-parry',
+    brainhole: 'brainhole-remix',
+  }
+
+  const candidateIds = [
+    'signal-reader',
+    'context-weaver',
+    styleSkillByBattleStyle[battleStyleId] || 'sarcasm-composer',
+    'communication-craft',
+    inputType === 'chat_screenshot' || inputType === 'meme' || inputType === 'mixed' ? 'meme-dispatcher' : '',
+    'humanizer-polish',
+  ].filter(Boolean)
+
+  return candidateIds
+    .map((id) => agentSkills.find((skill) => skill.id === id))
+    .filter(
+      (skill) =>
+        skill &&
+        skill.fitStyles.includes(battleStyleId || 'sarcastic') &&
+        skill.fitInputs.includes(inputType || 'unknown'),
+    )
+}
+
+function getSkillLoadout(payload, inputType, battleStyleId) {
+  const explicitIds = Array.isArray(payload.selectedSkillIds)
+    ? payload.selectedSkillIds.filter((item) => typeof item === 'string' && item.trim())
+    : []
+
+  const explicitSkills = explicitIds
+    .map((id) => agentSkills.find((skill) => skill.id === id))
+    .filter(Boolean)
+
+  if (explicitSkills.length) {
+    return explicitSkills
+  }
+
+  return getRecommendedSkills(inputType, battleStyleId)
+}
+
+function describeSkillLoadout(skills) {
+  if (!skills.length) {
+    return '当前未额外装配表达 Skill，按默认 Agent 逻辑执行。'
+  }
+
+  return `当前装配的 Skill 是：${skills
+    .map((skill) => `${skill.label}（${skill.effect}）`)
+    .join('；')}`
+}
+
+function getCommunicationMove(payload, inputAnalysis, battleStyleId) {
+  if (inputAnalysis?.inputType === 'chat_screenshot') {
+    return payload.relationshipId === 'crush'
+      ? '先接住对方原话，再轻轻刺回去，最后留一个让对方继续接的钩子。'
+      : '先确认对方在炫什么或阴什么，再用一句短回击把球踢回去。'
+  }
+
+  if (battleStyleId === 'cute') {
+    return '优先用委屈、卖萌和反差感把攻击弹回去，不要显得真的在生气。'
+  }
+
+  if (battleStyleId === 'aggressive') {
+    return '优先短句压回去，减少解释和铺垫，让节奏更硬。'
+  }
+
+  if (battleStyleId === 'brainhole') {
+    return '优先把输入改写成一个离谱但能秒懂的梗，再顺手回击。'
+  }
+
+  return '优先笑里藏刀，先像顺着对方说，再把气势反手压回去。'
+}
+
+function humanizeChatText(text, battleStyleId, focus) {
+  if (!text || typeof text !== 'string') {
+    return ''
+  }
+
+  let next = text
+    .trim()
+    .replace(/[“”]/g, '"')
+    .replace(/\s+/g, ' ')
+    .replace(/。+/g, '。')
+    .replace(/！+/g, '！')
+    .replace(/？+/g, '？')
+    .replace(/^如果这轮想把气氛带到.+?，/u, '')
+    .replace(/^建议[:：]?\s*/u, '')
+    .replace(/^当前[:：]?\s*/u, '')
+    .replace(/^本轮[:：]?\s*/u, '')
+    .replace(/我会选更自然一点的接法。?$/u, '')
+    .replace(/尽量|优先/g, '')
+    .trim()
+
+  if (focus?.includes('短一点')) {
+    next = next.replace(/，/g, '，').replace(/。$/, '')
+  }
+
+  if (battleStyleId === 'cute' && !/[呀啦哦嘛呐~]$/u.test(next)) {
+    next = `${next}${next.endsWith('?') || next.endsWith('？') ? '' : '呀'}`
+  }
+
+  if (battleStyleId === 'aggressive') {
+    next = next.replace(/是不是/gu, '是吧')
+  }
+
+  return next.slice(0, 48)
+}
+
+function applyHumanizerToBattleOutput(result, payload, skillLoadout) {
+  const humanizerEnabled = skillLoadout.some((skill) => skill.id === 'humanizer-polish')
+
+  if (!humanizerEnabled) {
+    return result
+  }
+
+  return {
+    ...result,
+    caption: humanizeChatText(result.caption, payload.battleStyleId, payload.focus),
+    quickReplies: Array.isArray(result.quickReplies)
+      ? result.quickReplies.map((reply) => humanizeChatText(reply, payload.battleStyleId, payload.focus))
+      : result.quickReplies,
+  }
+}
+
 async function ensureMemeGeneratorReady() {
   if (!memeGeneratorReadyPromise) {
     memeGeneratorReadyPromise = Promise.resolve().then(() => {
@@ -451,11 +677,111 @@ function pickTemplateForFallback(payload, inputType, battleStyleId) {
   )
 }
 
+function hasRealInput(payload) {
+  return Boolean(
+    payload?.imageName ||
+      payload?.imageDataUrl ||
+      (payload?.inputAnalysis && typeof payload.inputAnalysis === 'object'),
+  )
+}
+
+function buildGroundedFallbackLines(payload, inputAnalysis) {
+  const subject = inputAnalysis?.subject || '这张图'
+  const visualSummary = inputAnalysis?.visualSummary || '这波输入有明显的社交情绪和可接话空间。'
+  const tags = Array.isArray(inputAnalysis?.emotionTags) && inputAnalysis.emotionTags.length
+    ? inputAnalysis.emotionTags.slice(0, 4).join(' / ')
+    : '可玩梗 / 可接话'
+  const lastOpponentMessage = inputAnalysis?.lastOpponentMessage?.trim() || payload?.threadContext?.trim() || ''
+  const goal = payload?.desiredOutcome?.trim() || '让我回过去以后，对方继续接话。'
+  const styleName = payload?.battleStyleName || '阴阳怪气'
+  const focus = payload?.focus?.trim() || '像本人亲自出手'
+
+  return {
+    subject,
+    visualSummary,
+    tags,
+    lastOpponentMessage,
+    goal,
+    styleName,
+    focus,
+  }
+}
+
+function buildGroundedQuickReplies(payload, inputAnalysis) {
+  const { subject, lastOpponentMessage } = buildGroundedFallbackLines(payload, inputAnalysis)
+  const styleId = payload?.battleStyleId || 'sarcastic'
+
+  if (styleId === 'aggressive') {
+    return [
+      lastOpponentMessage ? `就这句“${lastOpponentMessage}”也想压我？` : `就这张 ${subject} 也想压我？`,
+      '你这波声势挺大，内容倒是一般。',
+      '先别装满分，回头容易掉线。',
+    ]
+  }
+
+  if (styleId === 'cute') {
+    return [
+      lastOpponentMessage ? `你发“${lastOpponentMessage}”的时候是不是还挺得意呀` : `你发这张 ${subject} 的时候是不是还挺得意呀`,
+      '你这一下确实有点欠，但还怪好笑的。',
+      '行吧，这次先记你一分，我等会儿回你。',
+    ]
+  }
+
+  if (styleId === 'brainhole') {
+    return [
+      lastOpponentMessage ? `你这句“${lastOpponentMessage}”像是外星人教你的` : `你这张 ${subject} 像是平行宇宙丢过来的`,
+      '气势挺足，逻辑像刚睡醒。',
+      '建议你先稳住表情，再决定要不要继续演。',
+    ]
+  }
+
+  return [
+    lastOpponentMessage ? `你这句“${lastOpponentMessage}”发得还挺理直气壮啊` : `你这张 ${subject} 发得还挺理直气壮啊`,
+    '我看见了，但我暂时不打算完全认同。',
+    '气氛你是带起来了，场子我先接住。',
+  ]
+}
+
+function buildGroundedReplyCards(payload, inputAnalysis, quickReplies) {
+  const { subject, visualSummary, tags, lastOpponentMessage, goal, styleName, focus } =
+    buildGroundedFallbackLines(payload, inputAnalysis)
+
+  return [
+    {
+      badge: '输入判断',
+      title: '先按真实图片信号接话',
+      body: `${subject} 这波最明显的信号是：${visualSummary} 当前优先抓 ${tags} 这些点，不再沿用默认演示场景。`,
+    },
+    {
+      badge: '主回复',
+      title: '先把对方气势接住再压回去',
+      body: lastOpponentMessage
+        ? `对方上一轮是“${lastOpponentMessage}”。这轮建议先发「${quickReplies[0]}」，会更像真人顺着现场把球打回去。`
+        : `这轮建议先发「${quickReplies[0]}」，先顺着图片气势接话，再把主导权慢慢拉回你这边。`,
+    },
+    {
+      badge: '执行原则',
+      title: '按你的目标和边界收住表达',
+      body: `本轮目标是“${goal}”，当前风格按「${styleName}」走，但会优先满足“${focus}”，避免回得太演示、太模板。`,
+    },
+  ]
+}
+
 function buildFallbackExperience(payload) {
   const scene = pick(scenes, payload.sceneId, scenes[1])
   const mode = pick(modes, payload.modeId, modes[2])
   const context = pick(contexts, payload.contextId, contexts[0])
   const relationship = pick(relationships, payload.relationshipId, relationships[1])
+  const inputType = payload.inputAnalysis?.inputType || inferInputType(payload)
+  const inputAnalysis = normalizeInputAnalysis(
+    payload.inputAnalysis,
+    buildFallbackInputAnalysis(payload),
+  )
+  const skillLoadout = getSkillLoadout(payload, inputType, payload.battleStyleId)
+  const usingRealInput = hasRealInput(payload)
+  const groundedQuickReplies = buildGroundedQuickReplies(payload, inputAnalysis)
+  const groundedReplyCards = buildGroundedReplyCards(payload, inputAnalysis, groundedQuickReplies)
+  const groundedMeta = buildGroundedFallbackLines(payload, inputAnalysis)
 
   const focusLine = payload.focus?.trim()
     ? `本轮优先遵循你的偏好：“${payload.focus.trim()}”。`
@@ -469,6 +795,9 @@ function buildFallbackExperience(payload) {
   const outcomeLine = payload.desiredOutcome?.trim()
     ? `本轮推进目标是：“${payload.desiredOutcome.trim()}”。`
     : '本轮默认目标是接住情绪并留下下一轮聊天空间。'
+  const skillLine = skillLoadout.length
+    ? `本轮还装配了「${skillLoadout.map((skill) => skill.label.replace(' Skill', '')).join(' / ')}」，会直接影响表情包选择和嘴替表达。`
+    : '当前没有额外技能装配，先按默认 Agent 表达链路执行。'
 
   const modeOpeners = {
     companion: '先稳稳接住情绪，再补一句让人觉得被认真看见的话。',
@@ -477,8 +806,41 @@ function buildFallbackExperience(payload) {
     deep: '先把图里的细节读准，再把回复延展成更有内容的交流。',
   }
 
+  if (usingRealInput) {
+    return {
+      summary: `${uploadLine}${threadLine}${outcomeLine}${focusLine}${skillLine} 当前优先按真实上传内容来组织回复，不再把默认演示场景当主导。`,
+      signal: `输入主体：${groundedMeta.subject}；主要信号：${groundedMeta.visualSummary}；当前更适合走「${mode.label}」并用 ${relationship.label} 的关系分寸来收住表达。`,
+      visualSignal: `这次最值得被接住的是「${groundedMeta.visualSummary}」这层画面和社交气势，系统会优先围绕 ${groundedMeta.tags} 来组织回法。`,
+      nextStep: groundedMeta.lastOpponentMessage
+        ? `先顺着对方那句“${groundedMeta.lastOpponentMessage}”接回去，再把聊天往“${groundedMeta.goal}”这个方向推进。`
+        : `先按图片本身的气势接一句，再把互动慢慢带到“${groundedMeta.goal}”。`,
+      analysisTags: [
+        inputAnalysis.inputType === 'chat_screenshot'
+          ? '聊天截图'
+          : inputAnalysis.inputType === 'meme'
+            ? '表情包/梗图'
+            : inputAnalysis.inputType === 'photo'
+              ? '普通图片'
+              : inputAnalysis.inputType,
+        ...inputAnalysis.emotionTags.slice(0, 3),
+        context.label,
+        relationship.label,
+      ].filter(Boolean),
+      replyCards: groundedReplyCards,
+      quickReplies: groundedQuickReplies,
+      launchPlan: [
+        `落地入口：${context.label}。${context.value}`,
+        `关系调性：${relationship.label}。${relationship.value}`,
+        `输入主体：${groundedMeta.subject}。优先根据真实图片信号和上一轮上下文生成回复。`,
+        skillLoadout.length
+          ? `能力装配：${skillLoadout.map((skill) => skill.label.replace(' Skill', '')).join(' / ')}。当前回复会按这组 Skill 收束表达方式。`
+          : '能力装配：默认 Agent 表达链路。后续可继续接入更多技能插件。',
+      ],
+    }
+  }
+
   return {
-    summary: `${uploadLine}${threadLine}${outcomeLine}${focusLine} 推荐采用「${mode.label}」，因为这张图的核心气质是“${scene.cue}”，最适合在 ${context.label} 里做有记忆点的专属回复。`,
+    summary: `${uploadLine}${threadLine}${outcomeLine}${focusLine}${skillLine} 推荐采用「${mode.label}」，因为这张图的核心气质是“${scene.cue}”，最适合在 ${context.label} 里做有记忆点的专属回复。`,
     signal: `${scene.productFit}；${mode.angle}。`,
     visualSignal: payload.imageName
       ? `这张图最值得被接住的是“${scene.cue}”这层氛围，系统会优先从画面主体、光线和情绪浓度里提炼聊天切口。`
@@ -523,6 +885,9 @@ function buildFallbackExperience(payload) {
       payload.desiredOutcome?.trim()
         ? `推进目标：${payload.desiredOutcome.trim()}。生成结果会围绕这个目标做连续互动编排。`
         : 'AI 输出形态：推荐回复表情包 + 文案回复卡 + 下一轮追问建议，形成连续互动。',
+      skillLoadout.length
+        ? `能力装配：${skillLoadout.map((skill) => skill.label.replace(' Skill', '')).join(' / ')}。当前回复会按这组 Skill 收束表达方式。`
+        : '能力装配：默认 Agent 表达链路。后续可继续接入更多技能插件。',
     ],
   }
 }
@@ -569,15 +934,16 @@ function normalizeExperience(candidate, fallback) {
   }
 }
 
-function buildFallbackInputAnalysis(payload) {
-  const inputType = inferInputType(payload)
+function buildFallbackInputAnalysis(payload, ocrHints = null) {
+  const inputType = ocrHints?.suggestScreenshot ? 'chat_screenshot' : inferInputType(payload)
+  const ocrBestMessage = pickBestOcrMessage(ocrHints?.lines || [])
   const threadContextSuggestion =
     inputType === 'chat_screenshot'
-      ? payload.threadContext?.trim() || '检测到这更像一张聊天截图，建议按截图里对方最后一句接回去。'
+      ? payload.threadContext?.trim() || ocrBestMessage || '检测到这更像一张聊天截图，建议按截图里对方最后一句接回去。'
       : ''
   const lastOpponentMessage =
     inputType === 'chat_screenshot'
-      ? payload.threadContext?.trim() || '你看看这波是不是拿捏了。'
+      ? payload.threadContext?.trim() || ocrBestMessage || '你看看这波是不是拿捏了。'
       : ''
 
   return {
@@ -588,15 +954,15 @@ function buildFallbackInputAnalysis(payload) {
         ? '这张图更像聊天或社交截图，重点不只是画面，还包括对话语气、先后轮次和对方在炫什么。'
         : '这张图更像单张表情包或返图，重点是表情、姿态、字幕和它传递出来的社交气势。',
     emotionTags: ['挑衅', '得意', '可回击'],
-    detectedText: inputType === 'chat_screenshot' && payload.threadContext?.trim() ? [payload.threadContext.trim()] : [],
+    detectedText:
+      inputType === 'chat_screenshot'
+        ? payload.threadContext?.trim()
+          ? [payload.threadContext.trim()]
+          : ocrHints?.lines?.slice(0, 8) || []
+        : [],
     conversationTurns:
       inputType === 'chat_screenshot' && lastOpponentMessage
-        ? [
-            {
-              speaker: '对方',
-              text: lastOpponentMessage,
-            },
-          ]
+        ? buildConversationTurnsFromOcr(ocrHints?.lines || [lastOpponentMessage])
         : [],
     threadContextSuggestion,
     lastOpponentMessage,
@@ -662,23 +1028,33 @@ function normalizeInputAnalysis(candidate, fallback) {
 }
 
 function buildFallbackBattleOutput(payload, fallback) {
-  const scene = pick(scenes, payload.sceneId, scenes[1])
   const battleStyleName = payload.battleStyleName || '阴阳怪气'
   const inputAnalysis = normalizeInputAnalysis(payload.inputAnalysis, buildFallbackInputAnalysis(payload))
   const template = getMemeTemplate(
     inputAnalysis.recommendedTemplateIds[0] ||
       pickTemplateForFallback(payload, inputAnalysis.inputType, payload.battleStyleId).id,
   )
+  const skillLoadout = getSkillLoadout(payload, inputAnalysis.inputType, payload.battleStyleId)
+  const primaryStrategySkill =
+    skillLoadout.find((skill) => skill.stage === '策略决策') || skillLoadout[0]
+  const skillReason = primaryStrategySkill
+    ? `本轮优先调用「${primaryStrategySkill.label.replace(' Skill', '')}」，所以回复会更偏「${primaryStrategySkill.tone}」的表达组织。`
+    : '本轮先按默认 Agent 表达链路组织反击。'
+  const groundedQuickReplies = buildGroundedQuickReplies(payload, inputAnalysis)
+  const groundedMeta = buildGroundedFallbackLines(payload, inputAnalysis)
+  const defaultProvocation =
+    inputAnalysis.inputType === 'meme' ? 58 : inputAnalysis.inputType === 'chat_screenshot' ? 46 : 52
 
   return {
     ...fallback,
-    caption: fallback.quickReplies[0] || scene.replySeed,
+    quickReplies: groundedQuickReplies,
+    caption: groundedQuickReplies[0] || fallback.quickReplies[0],
     subject: inputAnalysis.subject,
     emotionTags: inputAnalysis.emotionTags.length
       ? inputAnalysis.emotionTags.slice(0, 5)
-      : [scene.mood, '挑衅', battleStyleName],
-    provocationScore: scene.id === 'concert-night' ? 82 : scene.id === 'deadline-night' ? 61 : 73,
-    attackVector: `优先抓住“${scene.cue}”和对方最想炫的那层气势，转成 ${battleStyleName} 风格的反击。`,
+      : [battleStyleName, '可回击', '有气势'],
+    provocationScore: defaultProvocation,
+    attackVector: `优先抓住“${groundedMeta.visualSummary}”和对方最想传出来的那层气势，转成 ${battleStyleName} 风格的反击。${skillReason}`,
     inputType: inputAnalysis.inputType,
     memeTemplateId: template.id,
     memeTemplateReason: template.description,
@@ -741,6 +1117,110 @@ function dataUrlToImageBuffer(dataUrl, fallbackName = 'input.png') {
   return {
     name: fallbackName.endsWith(`.${extension}`) ? fallbackName : `${fallbackName}.${extension}`,
     data: Buffer.from(base64Data, 'base64'),
+  }
+}
+
+function normalizeImageUrlForArk(imageUrl) {
+  if (!imageUrl || typeof imageUrl !== 'string') {
+    return imageUrl
+  }
+
+  const matched = imageUrl.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/)
+  return matched ? matched[1] : imageUrl
+}
+
+function looksLikeChatScreenshotFromOcr(lines) {
+  const usefulLines = Array.isArray(lines) ? lines.filter((line) => typeof line === 'string' && line.trim()) : []
+  if (usefulLines.length >= 3) {
+    return true
+  }
+
+  const text = usefulLines.join(' ')
+  if (/QQ|微信|昨|今天|晚安|睡|在吗|干嘛|哈哈|？|。|：/u.test(text) && usefulLines.length >= 2) {
+    return true
+  }
+
+  return false
+}
+
+function looksLikeNicknameLine(line) {
+  const text = String(line || '').trim()
+  if (!text) {
+    return false
+  }
+
+  if (/LV\s*\d+/iu.test(text)) {
+    return true
+  }
+
+  if (/(群主|管理员|官方|认证|校内|状元|天尊|会员|等级)/u.test(text) && text.length >= 8) {
+    return true
+  }
+
+  const hasConversationPunctuation = /[，。！？?~～]/u.test(text)
+  const hasConversationWords = /(我|你|他|她|它|不是|有点|今天|昨晚|严重|轻微|发热|发烧|睡|吃|来|去|在吗|哈哈)/u.test(text)
+
+  if (!hasConversationPunctuation && !hasConversationWords && text.length >= 14) {
+    return true
+  }
+
+  return false
+}
+
+function pickBestOcrMessage(lines) {
+  const usefulLines = Array.isArray(lines)
+    ? lines.filter((line) => typeof line === 'string' && line.trim())
+    : []
+
+  const nonNicknameLines = usefulLines.filter((line) => !looksLikeNicknameLine(line))
+  const targetPool = nonNicknameLines.length ? nonNicknameLines : usefulLines
+  return targetPool[targetPool.length - 1] || ''
+}
+
+function buildConversationTurnsFromOcr(lines) {
+  const message = pickBestOcrMessage(lines)
+  return message
+    ? [
+        {
+          speaker: '对方',
+          text: message,
+        },
+      ]
+    : []
+}
+
+async function runLocalOcr(imageDataUrl, imageName = 'upload.png') {
+  const image = dataUrlToImageBuffer(imageDataUrl, imageName)
+  if (!image) {
+    return { ok: false, lines: [], fullText: '', suggestScreenshot: false }
+  }
+
+  const tempDir = await mkdtemp(join(tmpdir(), 'qq-agent-ocr-'))
+  const tempPath = join(tempDir, image.name)
+
+  try {
+    await writeFile(tempPath, image.data)
+    const { stdout } = await execFile('swift', ['scripts/local_ocr.swift', tempPath], {
+      cwd: process.cwd(),
+      timeout: 15000,
+      maxBuffer: 1024 * 1024,
+    })
+
+    const parsed = JSON.parse(stdout || '{}')
+    const lines = Array.isArray(parsed.lines)
+      ? parsed.lines.filter((line) => typeof line === 'string' && line.trim()).slice(0, 12)
+      : []
+
+    return {
+      ok: Boolean(parsed.ok),
+      lines,
+      fullText: typeof parsed.fullText === 'string' ? parsed.fullText : lines.join('\n'),
+      suggestScreenshot: looksLikeChatScreenshotFromOcr(lines),
+    }
+  } catch {
+    return { ok: false, lines: [], fullText: '', suggestScreenshot: false }
+  } finally {
+    await rm(tempDir, { recursive: true, force: true })
   }
 }
 
@@ -1153,7 +1633,7 @@ async function generateWithArk(payload, fallback) {
     userContent.push({
       type: 'image_url',
       image_url: {
-        url: payload.imageDataUrl,
+        url: normalizeImageUrlForArk(payload.imageDataUrl),
         detail: 'high',
       },
     })
@@ -1237,7 +1717,7 @@ async function generateWithArk(payload, fallback) {
   }
 }
 
-async function generateInputAnalysisWithArk(payload, fallback) {
+async function generateInputAnalysisWithArk(payload, fallback, ocrHints = null) {
   const outputSchema = {
     type: 'object',
     additionalProperties: false,
@@ -1289,6 +1769,9 @@ async function generateInputAnalysisWithArk(payload, fallback) {
         'lastOpponentMessage 要优先填写图里对方最后一条可读原话；只有实在看不清时才允许概括。',
         '如果输入只是纯表情包、梗图或普通图片，没有真实聊天对话，请把 lastOpponentMessage 和 threadContextSuggestion 都返回空字符串，conversationTurns 返回空数组，不要编造聊天内容。',
         '只输出 JSON，不要输出 markdown，不要解释。',
+        ocrHints?.lines?.length
+          ? `本地 OCR 预读结果（仅作辅助，不要盲信）：${JSON.stringify(ocrHints.lines)}`
+          : '本地 OCR 预读结果为空。',
         '',
         '可选 inputType 仅限：chat_screenshot、meme、photo、mixed、unknown。',
         'speaker 请优先使用“对方”“我”“未知”。',
@@ -1309,11 +1792,11 @@ async function generateInputAnalysisWithArk(payload, fallback) {
     },
   ]
 
-  if (payload.imageDataUrl && supportsImageInput) {
+  if (payload.imageDataUrl && supportsImageInput && !ocrHints?.suggestScreenshot) {
     userContent.push({
       type: 'image_url',
       image_url: {
-        url: payload.imageDataUrl,
+        url: normalizeImageUrlForArk(payload.imageDataUrl),
         detail: 'xhigh',
       },
     })
@@ -1405,6 +1888,8 @@ async function generateBattleWithArk(payload, fallback) {
       ? normalizeInputAnalysis(payload.inputAnalysis, inputFallback)
       : await generateInputAnalysisWithArk(payload, inputFallback)
   const battleFallback = buildFallbackBattleOutput(payload, fallback)
+  const skillLoadout = getSkillLoadout(payload, inputAnalysis.inputType, payload.battleStyleId)
+  const communicationMove = getCommunicationMove(payload, inputAnalysis, payload.battleStyleId)
   const outputSchema = {
     type: 'object',
     additionalProperties: false,
@@ -1478,6 +1963,16 @@ async function generateBattleWithArk(payload, fallback) {
             contextId: payload.contextId,
             relationshipId: payload.relationshipId,
             focus: payload.focus,
+            selectedSkillIds: Array.isArray(payload.selectedSkillIds) ? payload.selectedSkillIds : [],
+            selectedSkillLabels: Array.isArray(payload.selectedSkillLabels) ? payload.selectedSkillLabels : [],
+            activeSkillLoadout: skillLoadout.map((skill) => ({
+              id: skill.id,
+              label: skill.label,
+              stage: skill.stage,
+              tone: skill.tone,
+              effect: skill.effect,
+            })),
+            communicationMove,
             imageName: payload.imageName,
             threadContext: payload.threadContext,
             desiredOutcome: payload.desiredOutcome,
@@ -1505,6 +2000,8 @@ async function generateBattleWithArk(payload, fallback) {
         '',
         '输出要求：',
         '1. 用中文输出。',
+        `1.1 本轮必须显式遵循这组已装配的 Skill：${describeSkillLoadout(skillLoadout)}`,
+        `1.2 本轮优先按这个沟通结构组织回复：${communicationMove}`,
         '2. caption 是要单独发送出去的主回复文案，不要把它当成图片上的字幕。它必须短、狠、准，有社交传播感，控制在 8-24 个中文字符内。',
         '3. subject 要概括画面主体，比如“戴墨镜的柴犬”“故作镇定的自拍”“明显在炫耀的返图”。',
         '4. emotionTags 输出 3-5 个情绪标签。',
@@ -1515,7 +2012,7 @@ async function generateBattleWithArk(payload, fallback) {
         '9. memeTemplateId 必须从提供的模板库里选，优先选择能让回复显得像“现成表情包”而不是纯贴字的模板。',
         '10. memeTemplateReason 解释为什么选这张模板，要和对方语气、截图内容或图片气势对应起来。',
         '11. memeGeneratorKey 必须从提供的 memeGeneratorLibrary 里选一个最合适的回复表情包模板。这里是在“推荐发哪张表情包回去”，不是把原图重新做成新图。',
-        '12. 结合 battleStyleName、关系距离、聊天上下文和用户目标，不要写成泛泛鸡汤。',
+        '12. 结合 battleStyleName、关系距离、聊天上下文、用户目标和 activeSkillLoadout，不要写成泛泛鸡汤。',
         '13. 如果图片不是真的挑衅，也要给出轻反击或高情商接回去的处理，不要瞎怼。',
         '14. quickReplies 要像真人会发的句子，避免太书面、太完整、太用力过猛。',
         '15. 保证结果适合比赛 Demo 演示，既有梗又可落地。',
@@ -1523,11 +2020,16 @@ async function generateBattleWithArk(payload, fallback) {
     },
   ]
 
-  if (payload.imageDataUrl && supportsImageInput) {
+  if (
+    payload.imageDataUrl &&
+    supportsImageInput &&
+    inputAnalysis.inputType !== 'chat_screenshot' &&
+    !payload.inputAnalysis
+  ) {
     userContent.push({
       type: 'image_url',
       image_url: {
-        url: payload.imageDataUrl,
+        url: normalizeImageUrlForArk(payload.imageDataUrl),
         detail: 'high',
       },
     })
@@ -1539,7 +2041,7 @@ async function generateBattleWithArk(payload, fallback) {
       {
         role: 'system',
         content:
-          '你是一个懂 QQ 年轻人语气、表情包文化和社交斗图节奏的 AI 嘴替 Agent，擅长把视觉挑衅转成高命中率反击文案。',
+          `你是一个懂 QQ 年轻人语气、表情包文化和社交斗图节奏的 AI 嘴替 Agent，擅长把视觉挑衅转成高命中率反击文案。你必须像一个会调用能力模块的 Agent 一样工作，本轮优先遵循的表达 Skill 是：${describeSkillLoadout(skillLoadout)}。本轮沟通结构优先采用：${communicationMove}`,
       },
       {
         role: 'user',
@@ -1606,7 +2108,7 @@ async function generateBattleWithArk(payload, fallback) {
   try {
     const parsed = JSON.parse(cleanJsonText(text))
     const normalized = normalizeExperience(parsed, fallback)
-    return {
+    return applyHumanizerToBattleOutput({
       ...battleFallback,
       ...normalized,
       caption:
@@ -1634,9 +2136,9 @@ async function generateBattleWithArk(payload, fallback) {
           ? parsed.memeTemplateReason.trim()
           : battleFallback.memeTemplateReason,
       memeGeneratorKey: getMemeGeneratorTemplate(parsed.memeGeneratorKey).key,
-    }
+    }, payload, skillLoadout)
   } catch {
-    return battleFallback
+    return applyHumanizerToBattleOutput(battleFallback, payload, skillLoadout)
   }
 }
 
@@ -1647,6 +2149,24 @@ app.get('/api/health', (_request, response) => {
     model: hasArk ? model : undefined,
     message: arkProbe.message,
     supportsImageInput,
+  })
+})
+
+app.get('/api/agent/skills', (_request, response) => {
+  response.json({
+    ok: true,
+    skills: agentSkills.map((skill) => ({
+      id: skill.id,
+      label: skill.label,
+      stage: skill.stage,
+      tone: skill.tone,
+      summary: skill.effect,
+      fitStyles: skill.fitStyles,
+      fitInputs: skill.fitInputs,
+      implementation: skill.implementation,
+      source: 'backend',
+      status: 'wired',
+    })),
   })
 })
 
@@ -1676,17 +2196,36 @@ app.post('/api/generate', async (request, response) => {
 
 app.post('/api/battle/analyze-input', async (request, response) => {
   const payload = request.body ?? {}
-  const fallback = buildFallbackInputAnalysis(payload)
+  const ocrHints = payload.imageDataUrl ? await runLocalOcr(payload.imageDataUrl, payload.imageName || 'upload.png') : null
+  const fallback = buildFallbackInputAnalysis(payload, ocrHints)
 
   try {
-    const analysis = hasArk ? await generateInputAnalysisWithArk(payload, fallback) : fallback
+    const analysis = hasArk ? await generateInputAnalysisWithArk(payload, fallback, ocrHints) : fallback
+    const mergedAnalysis =
+      analysis.inputType === 'chat_screenshot' && ocrHints?.lines?.length
+        ? {
+            ...analysis,
+            detectedText: analysis.detectedText?.length ? analysis.detectedText : ocrHints.lines.slice(0, 8),
+            lastOpponentMessage: pickBestOcrMessage([analysis.lastOpponentMessage, ...ocrHints.lines]) || '',
+            threadContextSuggestion:
+              analysis.threadContextSuggestion && !looksLikeNicknameLine(analysis.threadContextSuggestion)
+                ? analysis.threadContextSuggestion
+                : pickBestOcrMessage(ocrHints.lines) || '',
+            conversationTurns:
+              Array.isArray(analysis.conversationTurns) &&
+              analysis.conversationTurns.some((turn) => !looksLikeNicknameLine(turn?.text))
+                ? analysis.conversationTurns.filter((turn) => !looksLikeNicknameLine(turn?.text))
+                : buildConversationTurnsFromOcr(ocrHints.lines),
+          }
+        : analysis
 
     response.json({
       ok: true,
       mode: hasArk ? 'ark' : 'fallback',
       supportsImageInput,
-      analysis,
-      recommendedTemplates: analysis.recommendedTemplateIds.map((templateId) => getMemeTemplate(templateId)),
+      analysis: mergedAnalysis,
+      ocrHints: ocrHints?.lines || [],
+      recommendedTemplates: mergedAnalysis.recommendedTemplateIds.map((templateId) => getMemeTemplate(templateId)),
     })
   } catch (error) {
     console.error('battle analyze input failed', error)
@@ -1695,6 +2234,7 @@ app.post('/api/battle/analyze-input', async (request, response) => {
       mode: 'fallback',
       supportsImageInput,
       analysis: fallback,
+      ocrHints: ocrHints?.lines || [],
       recommendedTemplates: fallback.recommendedTemplateIds.map((templateId) => getMemeTemplate(templateId)),
       warning: 'battle_input_analysis_failed_fallback_returned',
     })
