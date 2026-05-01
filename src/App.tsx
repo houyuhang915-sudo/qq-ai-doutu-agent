@@ -124,19 +124,6 @@ type BattleLog = {
   type: 'info' | 'system' | 'success' | 'warning'
 }
 
-type AgentSkill = {
-  id: string
-  label: string
-  stage: string
-  summary: string
-  tone: string
-  implementation?: string
-  source?: string
-  status?: string
-  fitStyles: string[]
-  fitInputs: InputAnalysis['inputType'][]
-}
-
 type SidebarTab = 'workbench' | 'library' | 'assets'
 
 const demoScenes: Scene[] = [
@@ -304,11 +291,59 @@ const inputTypeLabels: Record<InputAnalysis['inputType'], string> = {
   unknown: '待识别输入',
 }
 
+const PREFERENCES_KEY = 'qq-ai-doutu-preferences'
+
+type UserPreferences = {
+  battleStyleId: string
+  contextId: string
+  relationshipId: string
+  focus: string
+  desiredOutcome: string
+  actionCount: number
+  lastUsedAt: string
+}
+
+function loadPreferences(): Partial<UserPreferences> {
+  try {
+    const raw = localStorage.getItem(PREFERENCES_KEY)
+    if (!raw) return {}
+    return JSON.parse(raw) as Partial<UserPreferences>
+  } catch {
+    return {}
+  }
+}
+
+function savePreferences(prefs: Partial<UserPreferences>) {
+  try {
+    const existing = loadPreferences()
+    const merged = { ...existing, ...prefs, lastUsedAt: existing.lastUsedAt ?? new Date().toISOString() }
+    localStorage.setItem(PREFERENCES_KEY, JSON.stringify(merged))
+  } catch {
+    // ignore
+  }
+}
+
+function recordPreferenceUsage() {
+  try {
+    const existing = loadPreferences()
+    const merged = {
+      ...existing,
+      actionCount: (existing.actionCount ?? 0) + 1,
+      lastUsedAt: new Date().toISOString(),
+    }
+    localStorage.setItem(PREFERENCES_KEY, JSON.stringify(merged))
+  } catch {
+    // ignore
+  }
+}
+
+const savedPrefs = loadPreferences()
+
 const initialIds = {
   sceneId: 'concert-night',
-  contextId: 'qq-chat',
-  relationshipId: 'crush',
-  battleStyleId: 'sarcastic',
+  contextId: savedPrefs.contextId ?? 'qq-chat',
+  relationshipId: savedPrefs.relationshipId ?? 'crush',
+  battleStyleId: savedPrefs.battleStyleId ?? 'sarcastic',
 }
 
 function getScene(sceneId: string) {
@@ -333,48 +368,6 @@ function getBattleStyle(battleStyleId: string) {
 
 function getOptionByValue(options: Option[], value: string, fallback: Option) {
   return options.find((item) => item.value === value) ?? fallback
-}
-
-function getRecommendedSkills(skills: AgentSkill[], inputType: InputAnalysis['inputType'] | null, battleStyleId: string) {
-  const styleSkillByBattleStyle = {
-    sarcastic: 'sarcasm-composer',
-    aggressive: 'pressure-composer',
-    cute: 'cute-parry',
-    brainhole: 'brainhole-remix',
-  } as const
-
-  const candidateIds = [
-    'signal-reader',
-    'context-weaver',
-    styleSkillByBattleStyle[battleStyleId as keyof typeof styleSkillByBattleStyle] ?? 'sarcasm-composer',
-    'communication-craft',
-    inputType === 'chat_screenshot' || inputType === 'meme' || inputType === 'mixed' ? 'meme-dispatcher' : '',
-    'humanizer-polish',
-  ].filter(Boolean)
-
-  return candidateIds
-    .map((id) => skills.find((skill) => skill.id === id))
-    .filter((skill): skill is AgentSkill => Boolean(skill))
-    .filter(
-      (skill) =>
-        skill.fitStyles.includes(battleStyleId) &&
-        skill.fitInputs.includes(inputType ?? 'unknown'),
-    )
-}
-
-function sortSkillIds(ids: string[]) {
-  return [...ids].sort((left, right) => left.localeCompare(right))
-}
-
-function areSkillSetsEqual(left: string[], right: string[]) {
-  const leftSorted = sortSkillIds(left)
-  const rightSorted = sortSkillIds(right)
-
-  if (leftSorted.length !== rightSorted.length) {
-    return false
-  }
-
-  return leftSorted.every((item, index) => item === rightSorted[index])
 }
 
 function getAutoGoal(inputType: InputAnalysis['inputType'] | null, relationshipId: string) {
@@ -415,7 +408,6 @@ function createLocalExperience(input: {
   contextId: string
   relationshipId: string
   focus: string
-  skillLabels?: string[]
   imageName?: string
   threadContext?: string
   desiredOutcome?: string
@@ -436,10 +428,6 @@ function createLocalExperience(input: {
   const outcomeLine = input.desiredOutcome?.trim()
     ? `这轮推进目标是：“${input.desiredOutcome.trim()}”。`
     : '这轮默认目标是先把气氛接住，再留下下一轮聊天空间。'
-  const skillLine = input.skillLabels?.length
-    ? `这轮额外装配了「${input.skillLabels.join(' / ')}」来收紧表达风格。`
-    : '当前先按 Agent 默认表达链路来组织回法。'
-
   const modeOpeners: Record<string, string> = {
     companion: '先稳稳接住情绪，再补一句让人觉得被认真看见的话。',
     playful: '先把画面里的亮点变成一个轻巧包袱，再顺势把气氛推起来。',
@@ -448,7 +436,7 @@ function createLocalExperience(input: {
   }
 
   return {
-    summary: `${uploadLine}${threadLine}${outcomeLine}${focusLine}${skillLine} 推荐采用「${mode.label}」，因为这张图的核心气质是“${scene.cue}”，最适合在 ${context.label} 里做有记忆点的专属回复。`,
+    summary: `${uploadLine}${threadLine}${outcomeLine}${focusLine} 推荐采用「${mode.label}」，因为这张图的核心气质是“${scene.cue}”，最适合在 ${context.label} 里做有记忆点的专属回复。`,
     signal: `${scene.productFit}；${mode.angle ?? ''}`,
     visualSignal: input.imageName
       ? `这张图最值得被接住的是“${scene.cue}”这层氛围，系统会优先从主体、光线和情绪值里提炼回复切口。`
@@ -493,9 +481,24 @@ function createLocalExperience(input: {
       input.desiredOutcome?.trim()
         ? `推进目标：${input.desiredOutcome.trim()}。生成结果会围绕这个目标做连续互动编排。`
         : 'AI 输出形态：推荐回复表情包 + 文案回复卡 + 下一轮追问建议，形成连续互动。',
-      input.skillLabels?.length ? `能力装配：${input.skillLabels.join(' / ')}。当前回复会围绕这组表达 Skill 来做风格收束。` : '能力装配：默认 Agent 表达链路。后续可继续接入更多技能插件。',
+      '系统会在后端自动选择最合适的内部能力组合，前端只展示最终可执行结果。',
     ],
   } satisfies Experience
+}
+
+function formatConversationTurns(turns: ConversationTurn[] | null | undefined) {
+  if (!Array.isArray(turns) || !turns.length) {
+    return ''
+  }
+
+  return turns
+    .map((turn) => {
+      const speaker = turn?.speaker?.trim() || '对方'
+      const text = turn?.text?.trim() || ''
+      return text ? `${speaker}：${text}` : ''
+    })
+    .filter(Boolean)
+    .join('\n')
 }
 
 function sleep(ms: number) {
@@ -554,8 +557,8 @@ export default function App() {
   const uploadPanelRef = useRef<HTMLElement | null>(null)
   const renderPanelRef = useRef<HTMLElement | null>(null)
   const ammoPanelRef = useRef<HTMLElement | null>(null)
-  const defaultFocus = focusOptions[0].value ?? ''
-  const defaultDesiredOutcome = targetOptions[1].value ?? ''
+  const defaultFocus = savedPrefs.focus ?? focusOptions[0].value ?? ''
+  const defaultDesiredOutcome = savedPrefs.desiredOutcome ?? targetOptions[1].value ?? ''
 
   const [sceneId, setSceneId] = useState(initialIds.sceneId)
   const [battleStyleId, setBattleStyleId] = useState(initialIds.battleStyleId)
@@ -580,8 +583,9 @@ export default function App() {
   const [styleTouchedManually, setStyleTouchedManually] = useState(false)
   const [goalTouchedManually, setGoalTouchedManually] = useState(false)
   const [focusTouchedManually, setFocusTouchedManually] = useState(false)
-  const [skillTouchedManually, setSkillTouchedManually] = useState(false)
-  const [availableSkills, setAvailableSkills] = useState<AgentSkill[]>([])
+  const [chatHistory, setChatHistory] = useState<Array<{ role: 'incoming' | 'outgoing'; speaker: string; text: string }>>([])
+  const [pendingOpponentMessage, setPendingOpponentMessage] = useState('')
+  const [isGeneratingFollowUp, setIsGeneratingFollowUp] = useState(false)
   const [health, setHealth] = useState<HealthState>({
     ok: false,
     mode: 'unknown',
@@ -620,17 +624,6 @@ export default function App() {
   const styleOverrideActive = recommendedStyle.id !== battleStyle.id
   const goalOverrideActive = recommendedGoal.value !== desiredOutcome
   const focusOverrideActive = recommendedFocus.value !== focus
-  const recommendedSkills = getRecommendedSkills(availableSkills, inputAnalysis?.inputType ?? null, recommendedStyle.id)
-  const recommendedSkillIds = recommendedSkills.map((skill) => skill.id)
-  const recommendedSkillSignature = recommendedSkillIds.join('|')
-  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(() =>
-    recommendedSkillIds,
-  )
-  const activeSkills = availableSkills.filter((skill) => selectedSkillIds.includes(skill.id))
-  const skillOverrideActive = !areSkillSetsEqual(
-    selectedSkillIds,
-    recommendedSkillIds,
-  )
   const agentDecisionSummary =
     inputAnalysis?.inputType === 'chat_screenshot'
       ? '先读聊天上下文，再决定回击力度和接话方向。'
@@ -665,14 +658,13 @@ export default function App() {
       note: `${recommendedFocus.value || '像真人、够自然、可直接发出去。'}${focusOverrideActive ? ' · 当前已被你手动改写' : ''}`,
     },
   ]
-  const skillRouterSummary = activeSkills.length
-    ? `当前 Agent 已装配 ${activeSkills.map((skill) => skill.label.replace(' Skill', '')).join(' / ')}`
-    : recommendedSkills.length
-      ? '你可以保留 Agent 推荐技能，也可以手动替换当前的表达能力装配。'
-      : '当前还没有足够输入信号来装配表达 Skill。'
   const memeCaption = selectedReply || experience.quickReplies[0] || '装得挺像，继续。'
   const detectedOpponentLine =
     inputAnalysis?.lastOpponentMessage || threadContext || ''
+  const detectedConversationText =
+    formatConversationTurns(inputAnalysis?.conversationTurns) ||
+    inputAnalysis?.threadContextSuggestion ||
+    detectedOpponentLine
   const previewHistory =
     inputAnalysis?.conversationTurns?.length
       ? inputAnalysis.conversationTurns.map((turn) => ({
@@ -753,37 +745,13 @@ export default function App() {
       }
     }
 
-    const syncSkills = async (signal?: AbortSignal) => {
-      try {
-        const response = await fetch('/api/agent/skills', { signal })
-
-        if (!response.ok) {
-          throw new Error('skills request failed')
-        }
-
-        const payload = (await response.json()) as { ok: boolean; skills?: AgentSkill[] }
-
-        if (active) {
-          setAvailableSkills(Array.isArray(payload.skills) ? payload.skills : [])
-        }
-      } catch (error) {
-        if (!active || (error instanceof DOMException && error.name === 'AbortError')) {
-          return
-        }
-
-        setAvailableSkills([])
-      }
-    }
-
     const syncIfVisible = () => {
       if (document.visibilityState === 'visible') {
         void syncHealth()
-        void syncSkills()
       }
     }
 
     void syncHealth(controller.signal)
-    void syncSkills(controller.signal)
 
     const intervalId = window.setInterval(syncIfVisible, 15000)
     window.addEventListener('focus', syncIfVisible)
@@ -860,14 +828,6 @@ export default function App() {
   ])
 
   useEffect(() => {
-    if (!skillTouchedManually) {
-      setSelectedSkillIds((current) =>
-        areSkillSetsEqual(current, recommendedSkillIds) ? current : recommendedSkillIds,
-      )
-    }
-  }, [recommendedSkillIds, recommendedSkillSignature, skillTouchedManually])
-
-  useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [logs])
 
@@ -882,6 +842,17 @@ export default function App() {
 
     return () => window.clearTimeout(timer)
   }, [toastMessage])
+
+  // Save user preferences to localStorage
+  useEffect(() => {
+    savePreferences({
+      battleStyleId,
+      contextId,
+      relationshipId,
+      focus,
+      desiredOutcome,
+    })
+  }, [battleStyleId, contextId, relationshipId, focus, desiredOutcome])
 
   useLayoutEffect(() => {
     if (!shellRef.current) {
@@ -1007,8 +978,14 @@ export default function App() {
       setStyleTouchedManually(false)
       setGoalTouchedManually(false)
       setFocusTouchedManually(false)
-      setSkillTouchedManually(false)
-      setThreadContext(analysis.inputType === 'chat_screenshot' ? analysis.lastOpponentMessage || analysis.threadContextSuggestion || '' : '')
+      setThreadContext(
+        analysis.inputType === 'chat_screenshot'
+          ? formatConversationTurns(analysis.conversationTurns) ||
+              analysis.threadContextSuggestion ||
+              analysis.lastOpponentMessage ||
+              ''
+          : '',
+      )
       setToastMessage(
         analysis.inputType === 'chat_screenshot'
           ? '已识别为聊天截图，并自动回填上一轮对话。'
@@ -1044,7 +1021,6 @@ export default function App() {
     setStyleTouchedManually(false)
     setGoalTouchedManually(false)
     setFocusTouchedManually(false)
-    setSkillTouchedManually(false)
     setBattleTelemetry(null)
     setHasGenerated(false)
     setLogs([])
@@ -1132,20 +1108,6 @@ export default function App() {
     )
   }
 
-  function toggleSkill(skillId: string) {
-    setSkillTouchedManually(true)
-    setSelectedSkillIds((current) => {
-      if (current.includes(skillId)) {
-        if (current.length === 1) {
-          return current
-        }
-        return current.filter((item) => item !== skillId)
-      }
-
-      return [...current, skillId]
-    })
-  }
-
   async function handleGenerate() {
     setIsGenerating(true)
     setHasGenerated(false)
@@ -1159,7 +1121,6 @@ export default function App() {
       contextId,
       relationshipId,
       focus,
-      skillLabels: activeSkills.map((skill) => skill.label.replace(' Skill', '')),
       imageName,
       threadContext,
       desiredOutcome,
@@ -1179,8 +1140,6 @@ export default function App() {
         contextId,
         relationshipId,
         focus,
-        selectedSkillIds,
-        selectedSkillLabels: activeSkills.map((skill) => skill.label),
         imageDataUrl,
         imageName,
         inputAnalysis,
@@ -1231,13 +1190,8 @@ export default function App() {
       addLog('[Emotion Router] 情绪与挑衅指数分析启动', 'system')
       addLog(`> 检测到高频标签：${scene.mood} / 挑衅倾向 / 可玩梗空间`, 'warning')
       addLog(`> 已切换【${battleStyle.name}】反击战术`, 'info')
-      addLog('[Skill Router] 正在装配表达能力...', 'system')
-      addLog(
-        activeSkills.length
-          ? `> 已加载：${activeSkills.map((skill) => skill.label.replace(' Skill', '')).join(' / ')}${skillOverrideActive ? '（含人工改写）' : ''}`
-          : '> 当前未识别到可装配的表达 Skill，先按默认链路执行。',
-        'success',
-      )
+      addLog('[Agent Planner] 正在协调内部表达能力...', 'system')
+      addLog('> 已根据输入语境自动收紧回复风格和表情包匹配。', 'success')
 
       setGenerationStep(3)
       await sleep(560)
@@ -1297,9 +1251,29 @@ export default function App() {
       addLog('[系统] 回复表情包与文案已备好，可以直接发回战场。', 'success')
 
       setHasGenerated(true)
+      recordPreferenceUsage()
       setToastMessage(
         payload.mode === 'ark' ? 'Ark 已生成一版真实结果。' : '当前展示的是 fallback 版反击结果。',
       )
+
+      // Initialize chat history for multi-turn preview
+      const history: Array<{ role: 'incoming' | 'outgoing'; speaker: string; text: string }> = []
+      const analysisForHistory = payload.analysis ?? inputAnalysis
+      const detectedLineForHistory =
+        analysisForHistory?.lastOpponentMessage || threadContext || ''
+      if (analysisForHistory?.conversationTurns?.length) {
+        for (const turn of analysisForHistory.conversationTurns) {
+          history.push({ role: turn.speaker.includes('我') ? 'outgoing' : 'incoming', speaker: turn.speaker, text: turn.text })
+        }
+      } else if (detectedLineForHistory) {
+        history.push({ role: 'incoming', speaker: '对方', text: detectedLineForHistory })
+      }
+      const aiReply = payload.battle?.caption || nextExperience.quickReplies[0] || ''
+      if (aiReply) {
+        history.push({ role: 'outgoing', speaker: 'AI 推荐', text: aiReply })
+      }
+      setChatHistory(history)
+      setPendingOpponentMessage('')
     } catch {
       startTransition(() => {
         setExperience(fallback)
@@ -1314,6 +1288,68 @@ export default function App() {
       setToastMessage('后端请求失败，已切换到本地兜底结果。')
     } finally {
       setIsGenerating(false)
+    }
+  }
+
+  async function handleContinueChat() {
+    if (isGeneratingFollowUp) return
+    const opponentMessage = pendingOpponentMessage.trim()
+    if (!opponentMessage) {
+      setToastMessage('先输入对方刚发来的那句话，再让 AI 帮你接。')
+      return
+    }
+    setIsGeneratingFollowUp(true)
+
+    try {
+      const response = await fetch('/api/battle/follow-up', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatHistory,
+          battleStyleId,
+          battleStyleName: battleStyle.name,
+          contextId,
+          relationshipId,
+          focus,
+          desiredOutcome,
+          threadContext,
+          inputAnalysis,
+          opponentMessage,
+          selectedReply,
+          battleTelemetry,
+          experience,
+        }),
+      })
+
+      if (!response.ok) throw new Error(`follow-up failed: ${response.status}`)
+
+      const payload = await response.json() as {
+        aiReply: string
+        quickReplies: string[]
+      }
+
+      setChatHistory((prev) => [
+        ...prev,
+        { role: 'incoming', speaker: '对方', text: opponentMessage },
+        { role: 'outgoing', speaker: 'AI 推荐', text: payload.aiReply },
+      ])
+      setPendingOpponentMessage('')
+
+      if (payload.quickReplies?.length) {
+        setSelectedReply(payload.quickReplies[0])
+        startTransition(() => {
+          setExperience((prev) => ({
+            ...prev,
+            quickReplies: payload.quickReplies,
+          }))
+        })
+      }
+
+      setToastMessage('已生成下一轮互动。')
+    } catch {
+      setToastMessage('生成下一轮失败，请稍后重试。')
+    } finally {
+      setIsGeneratingFollowUp(false)
     }
   }
 
@@ -1478,6 +1514,11 @@ export default function App() {
                   <span className="micro-label">Agent Auto Decision</span>
                   <h3>{agentDecisionSummary}</h3>
                   <p>当前关键判断信号：{agentReasonTags}</p>
+                  {savedPrefs.lastUsedAt ? (
+                    <p className="preference-hint">
+                      已恢复你上次使用时保存的偏好设置。
+                    </p>
+                  ) : null}
                 </div>
                 {styleOverrideActive ? (
                   <button
@@ -1491,45 +1532,6 @@ export default function App() {
                     改回 Agent 推荐人格
                   </button>
                 ) : null}
-              </div>
-
-              <div className="skill-slot-toolbar">
-                <div>
-                  <span className="micro-label">Skill Loadout</span>
-                  <strong>{activeSkills.length ? `${activeSkills.length} 个表达 Skill 已装配` : '等待装配表达 Skill'}</strong>
-                  <p>后面接真实 skill 时，这里就是 Agent 的能力槽位入口。</p>
-                </div>
-                {skillOverrideActive ? (
-                  <button
-                    type="button"
-                    className="ghost-action"
-                    onClick={() => {
-                      setSkillTouchedManually(false)
-                      setSelectedSkillIds(recommendedSkillIds)
-                    }}
-                  >
-                    改回 Agent 推荐技能
-                  </button>
-                ) : null}
-              </div>
-
-              <div className="skill-loadout">
-                {recommendedSkills.map((skill) => {
-                  const isSelected = selectedSkillIds.includes(skill.id)
-
-                  return (
-                    <button
-                      key={skill.id}
-                      type="button"
-                      className={`skill-chip ${isSelected ? 'is-active' : ''}`}
-                      onClick={() => toggleSkill(skill.id)}
-                    >
-                      <span>{skill.stage}</span>
-                      <strong>{skill.label.replace(' Skill', '')}</strong>
-                      <small>{skill.tone}</small>
-                    </button>
-                  )
-                })}
               </div>
 
               <div className="panel-divider">
@@ -1615,10 +1617,10 @@ export default function App() {
                       />
                       <small className="battle-note-meta">
                         {isAnalyzingInput
-                          ? 'AI 正在从截图里抽取对方最后一轮消息。'
-                          : inputAnalysis?.lastOpponentMessage
-                            ? `AI 已识别：${inputAnalysis.lastOpponentMessage}`
-                            : '上传聊天截图后，这里会自动回填对方最后一轮可读消息。'}
+                          ? 'AI 正在从截图里抽取整段可读对话。'
+                          : detectedConversationText
+                            ? `AI 已识别：${detectedConversationText}`
+                            : '上传聊天截图后，这里会自动回填整段可读对话内容。'}
                       </small>
                     </label>
 
@@ -1818,27 +1820,6 @@ export default function App() {
                 <p>{battleTelemetry?.attackVector || experience.signal}</p>
               </article>
 
-              <article className="battle-panel intel-card full-width">
-                <div className="intel-card-head">
-                  <div>
-                    <span className="micro-label">Skill Router</span>
-                    <h4>能力装配</h4>
-                  </div>
-                  <small>{skillRouterSummary}</small>
-                </div>
-
-                <div className="skill-shelf">
-                  {activeSkills.map((skill) => (
-                    <article key={skill.id} className="skill-card is-selected">
-                      <span>{skill.stage}</span>
-                      <strong>{skill.label}</strong>
-                      <p>{skill.summary}</p>
-                      <small>{skill.tone}</small>
-                    </article>
-                  ))}
-                </div>
-              </article>
-
               <article
                 className={`battle-panel intel-card full-width ${activeSidebarTab === 'library' ? 'is-section-active' : ''}`}
                 ref={ammoPanelRef}
@@ -1909,7 +1890,17 @@ export default function App() {
                 </div>
 
                 <div className="send-chat">
-                  {previewHistory.length ? (
+                  {chatHistory.length ? (
+                    chatHistory.map((message, index) => (
+                      <article
+                        key={`${message.speaker}-${index}-${message.text}`}
+                        className={`send-message ${message.role}`}
+                      >
+                        <span>{message.speaker}</span>
+                        <p>{message.text}</p>
+                      </article>
+                    ))
+                  ) : previewHistory.length ? (
                     previewHistory.map((message, index) => (
                       <article
                         key={`${message.speaker}-${index}-${message.text}`}
@@ -1926,7 +1917,7 @@ export default function App() {
                     </article>
                   )}
 
-                  {aiReplyCandidates.map((message) => (
+                  {!chatHistory.length && aiReplyCandidates.map((message) => (
                     <article
                       key={`${message.speaker}-${message.text}`}
                       className={`send-message outgoing ${message.isPrimary ? 'is-primary' : ''}`}
@@ -1935,6 +1926,27 @@ export default function App() {
                       <p>{message.text}</p>
                     </article>
                   ))}
+
+                  {hasGenerated && (
+                    <div className="follow-up-composer">
+                      <label className="follow-up-input">
+                        <span>对方刚发了什么</span>
+                        <textarea
+                          value={pendingOpponentMessage}
+                          onChange={(event) => setPendingOpponentMessage(event.target.value)}
+                          placeholder="这里由你自己输入对方下一句，AI 只负责帮你接下一句。"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="follow-up-button"
+                        onClick={handleContinueChat}
+                        disabled={isGeneratingFollowUp || !pendingOpponentMessage.trim()}
+                      >
+                        {isGeneratingFollowUp ? '正在生成这一轮回复...' : '根据这句继续往下回 →'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </article>
 

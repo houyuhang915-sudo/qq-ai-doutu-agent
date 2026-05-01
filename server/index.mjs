@@ -409,6 +409,86 @@ const memeGeneratorTemplates = [
     fitStyles: ['brainhole', 'sarcastic'],
     description: '无字处置图，适合把对方离谱操作升级成“建议当场报备”的梗。',
   },
+  {
+    key: 'always_like',
+    label: '表面点赞',
+    strategy: 'image_based',
+    fitInputs: ['chat_screenshot', 'meme', 'photo', 'mixed', 'unknown'],
+    fitStyles: ['sarcastic', 'cute'],
+    description: '无字认同图，适合表面点头、实则把对方架起来阴阳一句。',
+  },
+  {
+    key: 'ask',
+    label: '灵魂发问',
+    strategy: 'image_based',
+    fitInputs: ['chat_screenshot', 'meme', 'photo', 'mixed', 'unknown'],
+    fitStyles: ['sarcastic', 'brainhole'],
+    description: '无字追问图，适合顺着对方的话抛一个反问，把球踢回去。',
+  },
+  {
+    key: 'back_to_work',
+    label: '回去上班',
+    strategy: 'image_based',
+    fitInputs: ['chat_screenshot', 'meme', 'photo', 'mixed', 'unknown'],
+    fitStyles: ['sarcastic', 'aggressive'],
+    description: '无字收场图，适合一句把对方打回工位，不想陪聊太久的时候用。',
+  },
+  {
+    key: 'capoo_rip',
+    label: '咖波开撕',
+    strategy: 'image_based',
+    fitInputs: ['chat_screenshot', 'meme', 'photo', 'mixed', 'unknown'],
+    fitStyles: ['aggressive', 'brainhole'],
+    description: '无字开撕图，适合挑衅值高时直接把场子撕开一点。',
+  },
+  {
+    key: 'capoo_rub',
+    label: '咖波揉搓',
+    strategy: 'image_based',
+    fitInputs: ['chat_screenshot', 'meme', 'photo', 'mixed', 'unknown'],
+    fitStyles: ['cute', 'brainhole'],
+    description: '无字搓一搓图，适合轻挑逗、装无辜和可爱反弹。',
+  },
+  {
+    key: 'dont_go_near',
+    label: '别靠近我',
+    strategy: 'image_based',
+    fitInputs: ['chat_screenshot', 'meme', 'photo', 'mixed', 'unknown'],
+    fitStyles: ['sarcastic', 'aggressive'],
+    description: '无字疏离图，适合嫌弃、回避和“你先离我远点”的冷处理。',
+  },
+  {
+    key: 'look_flat',
+    label: '平静盯你',
+    strategy: 'image_based',
+    fitInputs: ['chat_screenshot', 'meme', 'photo', 'mixed', 'unknown'],
+    fitStyles: ['sarcastic', 'cute'],
+    description: '无字淡脸图，适合不大吵大闹，只用平静压回去。',
+  },
+  {
+    key: 'raise_image',
+    label: '举图围观',
+    strategy: 'image_based',
+    fitInputs: ['chat_screenshot', 'meme', 'photo', 'mixed', 'unknown'],
+    fitStyles: ['brainhole', 'sarcastic'],
+    description: '无字举图图，适合把对方行为升级成“大家都来看看”的公开围观感。',
+  },
+  {
+    key: 'speechless',
+    label: '一时失语',
+    strategy: 'image_based',
+    fitInputs: ['chat_screenshot', 'meme', 'photo', 'mixed', 'unknown'],
+    fitStyles: ['sarcastic', 'cute'],
+    description: '无字失语图，适合对方话太怪时先停半拍，再补一句更狠的。',
+  },
+  {
+    key: 'step_on',
+    label: '踩回去',
+    strategy: 'image_based',
+    fitInputs: ['chat_screenshot', 'meme', 'photo', 'mixed', 'unknown'],
+    fitStyles: ['aggressive', 'brainhole'],
+    description: '无字踩场图，适合明显挑衅或故意找事时强势压回去。',
+  },
 ]
 
 let memeGeneratorReadyPromise
@@ -474,6 +554,46 @@ const memeTemplates = [
     fitInputs: ['meme', 'photo', 'mixed'],
     palette: ['#9bc4ff', '#5b7cff', '#12305b'],
   },
+  {
+    id: 'fake-approval',
+    label: '表面附和',
+    description: '适合嘴上先顺着，实则把对方架起来轻轻阴阳一下。',
+    renderStyle: 'chat',
+    emoji: '🙂',
+    fitStyles: ['sarcastic', 'cute'],
+    fitInputs: ['chat_screenshot', 'meme', 'mixed'],
+    palette: ['#98b4ff', '#6f7cff', '#23326f'],
+  },
+  {
+    id: 'blank-judge',
+    label: '无语审判',
+    description: '适合对方发言太怪时，先冷几秒，再回一个无语但有压迫感的态度。',
+    renderStyle: 'poster',
+    emoji: '😶',
+    fitStyles: ['sarcastic', 'aggressive'],
+    fitInputs: ['chat_screenshot', 'meme', 'mixed'],
+    palette: ['#a7b2c9', '#6f7a94', '#20273b'],
+  },
+  {
+    id: 'soft-poke',
+    label: '轻戳一下',
+    description: '适合不想把关系弄僵时，用轻轻回戳的方式把气势拿回来。',
+    renderStyle: 'chat',
+    emoji: '🫠',
+    fitStyles: ['cute', 'brainhole'],
+    fitInputs: ['chat_screenshot', 'meme', 'photo'],
+    palette: ['#8ce0d2', '#6da9ff', '#32418e'],
+  },
+  {
+    id: 'public-watch',
+    label: '公开围观',
+    description: '适合群聊和截图场景，把对方这波操作做成大家都能围观的姿态。',
+    renderStyle: 'sticker',
+    emoji: '📢',
+    fitStyles: ['brainhole', 'sarcastic'],
+    fitInputs: ['chat_screenshot', 'mixed', 'meme'],
+    palette: ['#9bb7ff', '#7280ff', '#232f7a'],
+  },
 ]
 
 function getMemeTemplate(templateId) {
@@ -497,7 +617,98 @@ function seedIndex(seed, length) {
   return total % length
 }
 
-function pickFallbackMemeGeneratorTemplate(inputType, battleStyleId) {
+const templateRoutePresets = {
+  flirt_tension: {
+    label: '暧昧拉扯',
+    reason: '适合嘴硬带甜味、轻戳一下、不能回得太重。',
+    memeTemplateIds: ['pity-bounce', 'soft-poke', 'fake-approval', 'side-eye-card'],
+    memeGeneratorKeys: ['capoo_rub', 'why_at_me', 'look_flat', 'always_like', 'tease'],
+  },
+  group_public: {
+    label: '群聊围观',
+    reason: '适合公开点名、举图围观、把对方放到大家都能看的场子里。',
+    memeTemplateIds: ['group-judge', 'public-watch', 'blank-judge', 'side-eye-card'],
+    memeGeneratorKeys: ['raise_image', 'stare_at_you', 'policeman', 'google_captcha', 'out'],
+  },
+  pity_rebound: {
+    label: '卖惨反弹',
+    reason: '适合对方装可怜、说自己很惨、想博关注时软着回刺。',
+    memeTemplateIds: ['pity-bounce', 'soft-poke', 'fake-approval'],
+    memeGeneratorKeys: ['cover_face', 'speechless', 'you_dont_get', 'capoo_rub', 'dog_dislike'],
+  },
+  brag_shutdown: {
+    label: '炫耀压回',
+    reason: '适合炫耀、挑衅、故意抬自己或明显压人的场景，回法要稳准狠。',
+    memeTemplateIds: ['hard-clapback', 'deal-with-it', 'blank-judge', 'side-eye-card'],
+    memeGeneratorKeys: ['back_to_work', 'dont_go_near', 'step_on', 'garbage', 'clown', 'clown_mask'],
+  },
+  playful_banter: {
+    label: '轻松玩梗',
+    reason: '适合熟人互损、普通梗图、轻松接话，不需要上来就公开处刑。',
+    memeTemplateIds: ['side-eye-card', 'brainrot-bomb', 'soft-poke', 'fake-approval'],
+    memeGeneratorKeys: ['ask', 'confuse', 'funny_mirror', 'jerry_stare', 'capoo_point', 'always_like'],
+  },
+}
+
+function getTemplateRoute(payload, inputAnalysis, battleStyleId) {
+  const relationshipId = payload?.relationshipId || 'crush'
+  const contextId = payload?.contextId || 'qq-chat'
+  const goal = payload?.desiredOutcome || ''
+  const focus = payload?.focus || ''
+  const lastOpponentMessage = inputAnalysis?.lastOpponentMessage || ''
+  const visualSummary = inputAnalysis?.visualSummary || ''
+  const tags = Array.isArray(inputAnalysis?.emotionTags) ? inputAnalysis.emotionTags.join(' / ') : ''
+  const textSignals = `${lastOpponentMessage} ${visualSummary} ${tags} ${goal} ${focus}`
+
+  if (
+    contextId === 'group-icebreak' ||
+    /群|围观|大家|公开|审判|截图发群/u.test(textSignals)
+  ) {
+    return 'group_public'
+  }
+
+  if (
+    relationshipId === 'crush' &&
+    (/暧昧|甜|亲近|玩梗|别冷场/u.test(textSignals) || battleStyleId === 'cute')
+  ) {
+    return 'flirt_tension'
+  }
+
+  if (/轻微热|不严重|难受|发烧|发热|困|累|委屈|可怜|没人陪|卖惨/u.test(textSignals)) {
+    return 'pity_rebound'
+  }
+
+  if (
+    battleStyleId === 'aggressive' ||
+    /挑衅|得意|炫耀|装懂|装杯|压人|拿捏|老大|厉害/u.test(textSignals)
+  ) {
+    return 'brag_shutdown'
+  }
+
+  return 'playful_banter'
+}
+
+function pickFallbackMemeGeneratorTemplate(inputType, battleStyleId, routeKey = 'playful_banter') {
+  const routePreset = templateRoutePresets[routeKey] || templateRoutePresets.playful_banter
+  const routeStrictMatches = memeGeneratorTemplates.filter(
+    (item) =>
+      routePreset.memeGeneratorKeys.includes(item.key) &&
+      item.fitInputs.includes(inputType || 'unknown') &&
+      item.fitStyles.includes(battleStyleId || 'sarcastic'),
+  )
+  if (routeStrictMatches.length) {
+    return routeStrictMatches[seedIndex(`${routeKey}:${inputType}:${battleStyleId}`, routeStrictMatches.length)]
+  }
+
+  const routeInputMatches = memeGeneratorTemplates.filter(
+    (item) =>
+      routePreset.memeGeneratorKeys.includes(item.key) &&
+      item.fitInputs.includes(inputType || 'unknown'),
+  )
+  if (routeInputMatches.length) {
+    return routeInputMatches[seedIndex(`${routeKey}:${inputType}`, routeInputMatches.length)]
+  }
+
   const strictMatches = memeGeneratorTemplates.filter(
     (item) =>
       item.fitInputs.includes(inputType || 'unknown') &&
@@ -665,7 +876,29 @@ function inferInputType(payload) {
   return 'unknown'
 }
 
-function pickTemplateForFallback(payload, inputType, battleStyleId) {
+function pickTemplateForFallback(payload, inputType, battleStyleId, inputAnalysis = null) {
+  const routeKey = getTemplateRoute(payload, inputAnalysis, battleStyleId)
+  const routePreset = templateRoutePresets[routeKey] || templateRoutePresets.playful_banter
+
+  const routeStrictMatches = memeTemplates.filter(
+    (item) =>
+      routePreset.memeTemplateIds.includes(item.id) &&
+      item.fitStyles.includes(battleStyleId || 'sarcastic') &&
+      item.fitInputs.includes(inputType || 'mixed'),
+  )
+  if (routeStrictMatches.length) {
+    return routeStrictMatches[seedIndex(`${routeKey}:${inputType}:${battleStyleId}`, routeStrictMatches.length)]
+  }
+
+  const routeInputMatches = memeTemplates.filter(
+    (item) =>
+      routePreset.memeTemplateIds.includes(item.id) &&
+      item.fitInputs.includes(inputType || 'mixed'),
+  )
+  if (routeInputMatches.length) {
+    return routeInputMatches[seedIndex(`${routeKey}:${inputType}`, routeInputMatches.length)]
+  }
+
   return (
     memeTemplates.find(
       (item) =>
@@ -777,7 +1010,6 @@ function buildFallbackExperience(payload) {
     payload.inputAnalysis,
     buildFallbackInputAnalysis(payload),
   )
-  const skillLoadout = getSkillLoadout(payload, inputType, payload.battleStyleId)
   const usingRealInput = hasRealInput(payload)
   const groundedQuickReplies = buildGroundedQuickReplies(payload, inputAnalysis)
   const groundedReplyCards = buildGroundedReplyCards(payload, inputAnalysis, groundedQuickReplies)
@@ -795,10 +1027,6 @@ function buildFallbackExperience(payload) {
   const outcomeLine = payload.desiredOutcome?.trim()
     ? `本轮推进目标是：“${payload.desiredOutcome.trim()}”。`
     : '本轮默认目标是接住情绪并留下下一轮聊天空间。'
-  const skillLine = skillLoadout.length
-    ? `本轮还装配了「${skillLoadout.map((skill) => skill.label.replace(' Skill', '')).join(' / ')}」，会直接影响表情包选择和嘴替表达。`
-    : '当前没有额外技能装配，先按默认 Agent 表达链路执行。'
-
   const modeOpeners = {
     companion: '先稳稳接住情绪，再补一句让人觉得被认真看见的话。',
     playful: '先把画面里的亮点变成一个轻巧包袱，再顺势把气氛推起来。',
@@ -808,7 +1036,7 @@ function buildFallbackExperience(payload) {
 
   if (usingRealInput) {
     return {
-      summary: `${uploadLine}${threadLine}${outcomeLine}${focusLine}${skillLine} 当前优先按真实上传内容来组织回复，不再把默认演示场景当主导。`,
+      summary: `${uploadLine}${threadLine}${outcomeLine}${focusLine} 当前优先按真实上传内容来组织回复，不再把默认演示场景当主导。`,
       signal: `输入主体：${groundedMeta.subject}；主要信号：${groundedMeta.visualSummary}；当前更适合走「${mode.label}」并用 ${relationship.label} 的关系分寸来收住表达。`,
       visualSignal: `这次最值得被接住的是「${groundedMeta.visualSummary}」这层画面和社交气势，系统会优先围绕 ${groundedMeta.tags} 来组织回法。`,
       nextStep: groundedMeta.lastOpponentMessage
@@ -832,15 +1060,13 @@ function buildFallbackExperience(payload) {
         `落地入口：${context.label}。${context.value}`,
         `关系调性：${relationship.label}。${relationship.value}`,
         `输入主体：${groundedMeta.subject}。优先根据真实图片信号和上一轮上下文生成回复。`,
-        skillLoadout.length
-          ? `能力装配：${skillLoadout.map((skill) => skill.label.replace(' Skill', '')).join(' / ')}。当前回复会按这组 Skill 收束表达方式。`
-          : '能力装配：默认 Agent 表达链路。后续可继续接入更多技能插件。',
+        '系统会在后端自动调度内部能力模块，前端只展示最终可执行结果。',
       ],
     }
   }
 
   return {
-    summary: `${uploadLine}${threadLine}${outcomeLine}${focusLine}${skillLine} 推荐采用「${mode.label}」，因为这张图的核心气质是“${scene.cue}”，最适合在 ${context.label} 里做有记忆点的专属回复。`,
+    summary: `${uploadLine}${threadLine}${outcomeLine}${focusLine} 推荐采用「${mode.label}」，因为这张图的核心气质是“${scene.cue}”，最适合在 ${context.label} 里做有记忆点的专属回复。`,
     signal: `${scene.productFit}；${mode.angle}。`,
     visualSignal: payload.imageName
       ? `这张图最值得被接住的是“${scene.cue}”这层氛围，系统会优先从画面主体、光线和情绪浓度里提炼聊天切口。`
@@ -885,9 +1111,7 @@ function buildFallbackExperience(payload) {
       payload.desiredOutcome?.trim()
         ? `推进目标：${payload.desiredOutcome.trim()}。生成结果会围绕这个目标做连续互动编排。`
         : 'AI 输出形态：推荐回复表情包 + 文案回复卡 + 下一轮追问建议，形成连续互动。',
-      skillLoadout.length
-        ? `能力装配：${skillLoadout.map((skill) => skill.label.replace(' Skill', '')).join(' / ')}。当前回复会按这组 Skill 收束表达方式。`
-        : '能力装配：默认 Agent 表达链路。后续可继续接入更多技能插件。',
+      '系统会在后端自动调度内部能力模块，前端只展示最终可执行结果。',
     ],
   }
 }
@@ -937,9 +1161,23 @@ function normalizeExperience(candidate, fallback) {
 function buildFallbackInputAnalysis(payload, ocrHints = null) {
   const inputType = ocrHints?.suggestScreenshot ? 'chat_screenshot' : inferInputType(payload)
   const ocrBestMessage = pickBestOcrMessage(ocrHints?.lines || [])
+  const ocrConversationTurns = buildConversationTurnsFromOcr(ocrHints?.lines || [])
+  const ocrThreadContext = buildThreadContextFromTurns(ocrConversationTurns)
+  const lightweightAnalysis = {
+    inputType,
+    lastOpponentMessage:
+      inputType === 'chat_screenshot'
+        ? payload.threadContext?.trim() || ocrBestMessage || ''
+        : '',
+    visualSummary:
+      inputType === 'chat_screenshot'
+        ? '这张图更像聊天或社交截图，重点不只是画面，还包括对话语气、先后轮次和对方在炫什么。'
+        : '这张图更像单张表情包或返图，重点是表情、姿态、字幕和它传递出来的社交气势。',
+    emotionTags: ['挑衅', '得意', '可回击'],
+  }
   const threadContextSuggestion =
     inputType === 'chat_screenshot'
-      ? payload.threadContext?.trim() || ocrBestMessage || '检测到这更像一张聊天截图，建议按截图里对方最后一句接回去。'
+      ? payload.threadContext?.trim() || ocrThreadContext || ocrBestMessage || '检测到这更像一张聊天截图，建议按截图里的对话内容接回去。'
       : ''
   const lastOpponentMessage =
     inputType === 'chat_screenshot'
@@ -962,12 +1200,14 @@ function buildFallbackInputAnalysis(payload, ocrHints = null) {
         : [],
     conversationTurns:
       inputType === 'chat_screenshot' && lastOpponentMessage
-        ? buildConversationTurnsFromOcr(ocrHints?.lines || [lastOpponentMessage])
+        ? (ocrConversationTurns.length ? ocrConversationTurns : buildConversationTurnsFromOcr([lastOpponentMessage]))
         : [],
     threadContextSuggestion,
     lastOpponentMessage,
     suggestedBattleStyleId: payload.battleStyleId || 'sarcastic',
-    recommendedTemplateIds: [pickTemplateForFallback(payload, inputType, payload.battleStyleId).id],
+    recommendedTemplateIds: [
+      pickTemplateForFallback(payload, inputType, payload.battleStyleId, lightweightAnalysis).id,
+    ],
   }
 }
 
@@ -1030,9 +1270,10 @@ function normalizeInputAnalysis(candidate, fallback) {
 function buildFallbackBattleOutput(payload, fallback) {
   const battleStyleName = payload.battleStyleName || '阴阳怪气'
   const inputAnalysis = normalizeInputAnalysis(payload.inputAnalysis, buildFallbackInputAnalysis(payload))
+  const templateRoute = getTemplateRoute(payload, inputAnalysis, payload.battleStyleId)
   const template = getMemeTemplate(
     inputAnalysis.recommendedTemplateIds[0] ||
-      pickTemplateForFallback(payload, inputAnalysis.inputType, payload.battleStyleId).id,
+      pickTemplateForFallback(payload, inputAnalysis.inputType, payload.battleStyleId, inputAnalysis).id,
   )
   const skillLoadout = getSkillLoadout(payload, inputAnalysis.inputType, payload.battleStyleId)
   const primaryStrategySkill =
@@ -1057,10 +1298,11 @@ function buildFallbackBattleOutput(payload, fallback) {
     attackVector: `优先抓住“${groundedMeta.visualSummary}”和对方最想传出来的那层气势，转成 ${battleStyleName} 风格的反击。${skillReason}`,
     inputType: inputAnalysis.inputType,
     memeTemplateId: template.id,
-    memeTemplateReason: template.description,
+    memeTemplateReason: `${template.description} 当前模板路由：${templateRoutePresets[templateRoute]?.label || '轻松玩梗'}。`,
     memeGeneratorKey: pickFallbackMemeGeneratorTemplate(
       inputAnalysis.inputType,
       payload.battleStyleId,
+      templateRoute,
     ).key,
   }
 }
@@ -1125,8 +1367,7 @@ function normalizeImageUrlForArk(imageUrl) {
     return imageUrl
   }
 
-  const matched = imageUrl.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/)
-  return matched ? matched[1] : imageUrl
+  return imageUrl
 }
 
 function looksLikeChatScreenshotFromOcr(lines) {
@@ -1167,26 +1408,74 @@ function looksLikeNicknameLine(line) {
   return false
 }
 
+function looksLikeTimestampLine(line) {
+  const text = String(line || '').trim()
+  if (!text) {
+    return false
+  }
+
+  if (/^(昨天|今天|前天|凌晨|上午|中午|下午|晚上)\s*\d{1,2}([:：.]?\d{0,2})?[:：]?$/u.test(text)) {
+    return true
+  }
+
+  if (/^\d{1,2}([:：.]?\d{0,2})[:：]?$/u.test(text)) {
+    return true
+  }
+
+  if (/^(昨天|今天|前天)$/u.test(text)) {
+    return true
+  }
+
+  return false
+}
+
+function looksLikeMetaLine(line) {
+  return looksLikeNicknameLine(line) || looksLikeTimestampLine(line)
+}
+
 function pickBestOcrMessage(lines) {
   const usefulLines = Array.isArray(lines)
     ? lines.filter((line) => typeof line === 'string' && line.trim())
     : []
 
-  const nonNicknameLines = usefulLines.filter((line) => !looksLikeNicknameLine(line))
-  const targetPool = nonNicknameLines.length ? nonNicknameLines : usefulLines
+  const nonMetaLines = usefulLines.filter((line) => !looksLikeMetaLine(line))
+  const targetPool = nonMetaLines.length ? nonMetaLines : usefulLines
   return targetPool[targetPool.length - 1] || ''
 }
 
-function buildConversationTurnsFromOcr(lines) {
-  const message = pickBestOcrMessage(lines)
-  return message
-    ? [
-        {
-          speaker: '对方',
-          text: message,
-        },
-      ]
+function extractConversationTextLines(lines) {
+  const usefulLines = Array.isArray(lines)
+    ? lines.filter((line) => typeof line === 'string' && line.trim())
     : []
+
+  const nonMetaLines = usefulLines.filter((line) => !looksLikeMetaLine(line))
+  const targetPool = nonMetaLines.length ? nonMetaLines : usefulLines
+
+  return targetPool
+    .map((line) => String(line).trim())
+    .filter(Boolean)
+    .filter((line, index, arr) => arr.findIndex((item) => item === line) === index)
+    .slice(0, 8)
+}
+
+function buildConversationTurnsFromOcr(lines) {
+  return extractConversationTextLines(lines).map((message) => ({
+    speaker: '对方',
+    text: message,
+  }))
+}
+
+function buildThreadContextFromTurns(turns) {
+  const normalizedTurns = Array.isArray(turns)
+    ? turns
+        .map((turn) => ({
+          speaker: typeof turn?.speaker === 'string' && turn.speaker.trim() ? turn.speaker.trim() : '对方',
+          text: typeof turn?.text === 'string' && turn.text.trim() ? turn.text.trim() : '',
+        }))
+        .filter((turn) => turn.text)
+    : []
+
+  return normalizedTurns.map((turn) => `${turn.speaker}：${turn.text}`).join('\n')
 }
 
 async function runLocalOcr(imageDataUrl, imageName = 'upload.png') {
@@ -1890,6 +2179,8 @@ async function generateBattleWithArk(payload, fallback) {
   const battleFallback = buildFallbackBattleOutput(payload, fallback)
   const skillLoadout = getSkillLoadout(payload, inputAnalysis.inputType, payload.battleStyleId)
   const communicationMove = getCommunicationMove(payload, inputAnalysis, payload.battleStyleId)
+  const templateRoute = getTemplateRoute(payload, inputAnalysis, payload.battleStyleId)
+  const routePreset = templateRoutePresets[templateRoute] || templateRoutePresets.playful_banter
   const outputSchema = {
     type: 'object',
     additionalProperties: false,
@@ -1973,6 +2264,11 @@ async function generateBattleWithArk(payload, fallback) {
               effect: skill.effect,
             })),
             communicationMove,
+            templateRoute: {
+              key: templateRoute,
+              label: routePreset.label,
+              reason: routePreset.reason,
+            },
             imageName: payload.imageName,
             threadContext: payload.threadContext,
             desiredOutcome: payload.desiredOutcome,
@@ -1985,6 +2281,13 @@ async function generateBattleWithArk(payload, fallback) {
               fitInputs: item.fitInputs,
               renderStyle: item.renderStyle,
             })),
+            routedMemeTemplateCandidates: memeTemplates
+              .filter((item) => routePreset.memeTemplateIds.includes(item.id))
+              .map((item) => ({
+                id: item.id,
+                label: item.label,
+                description: item.description,
+              })),
             memeGeneratorLibrary: memeGeneratorTemplates.map((item) => ({
               key: item.key,
               label: item.label,
@@ -1993,6 +2296,13 @@ async function generateBattleWithArk(payload, fallback) {
               fitStyles: item.fitStyles,
               fitInputs: item.fitInputs,
             })),
+            routedMemeGeneratorCandidates: memeGeneratorTemplates
+              .filter((item) => routePreset.memeGeneratorKeys.includes(item.key))
+              .map((item) => ({
+                key: item.key,
+                label: item.label,
+                description: item.description,
+              })),
           },
           null,
           2,
@@ -2002,6 +2312,7 @@ async function generateBattleWithArk(payload, fallback) {
         '1. 用中文输出。',
         `1.1 本轮必须显式遵循这组已装配的 Skill：${describeSkillLoadout(skillLoadout)}`,
         `1.2 本轮优先按这个沟通结构组织回复：${communicationMove}`,
+        `1.3 本轮模板路由优先走「${routePreset.label}」：${routePreset.reason}`,
         '2. caption 是要单独发送出去的主回复文案，不要把它当成图片上的字幕。它必须短、狠、准，有社交传播感，控制在 8-24 个中文字符内。',
         '3. subject 要概括画面主体，比如“戴墨镜的柴犬”“故作镇定的自拍”“明显在炫耀的返图”。',
         '4. emotionTags 输出 3-5 个情绪标签。',
@@ -2009,9 +2320,9 @@ async function generateBattleWithArk(payload, fallback) {
         '6. attackVector 说明为什么应该从这个点回击。',
         '7. quickReplies 输出 3 条，可以比 caption 稍长，但都要能直接发。',
         '8. replyCards 输出 3 条，像产品里的 AI 建议卡。',
-        '9. memeTemplateId 必须从提供的模板库里选，优先选择能让回复显得像“现成表情包”而不是纯贴字的模板。',
+        '9. memeTemplateId 必须从提供的模板库里选，优先从 routedMemeTemplateCandidates 里选，只有明显不合适时再看全量模板库。',
         '10. memeTemplateReason 解释为什么选这张模板，要和对方语气、截图内容或图片气势对应起来。',
-        '11. memeGeneratorKey 必须从提供的 memeGeneratorLibrary 里选一个最合适的回复表情包模板。这里是在“推荐发哪张表情包回去”，不是把原图重新做成新图。',
+        '11. memeGeneratorKey 必须从提供的 memeGeneratorLibrary 里选一个最合适的回复表情包模板。优先从 routedMemeGeneratorCandidates 里选。这里是在“推荐发哪张表情包回去”，不是把原图重新做成新图。',
         '12. 结合 battleStyleName、关系距离、聊天上下文、用户目标和 activeSkillLoadout，不要写成泛泛鸡汤。',
         '13. 如果图片不是真的挑衅，也要给出轻反击或高情商接回去的处理，不要瞎怼。',
         '14. quickReplies 要像真人会发的句子，避免太书面、太完整、太用力过猛。',
@@ -2203,20 +2514,26 @@ app.post('/api/battle/analyze-input', async (request, response) => {
     const analysis = hasArk ? await generateInputAnalysisWithArk(payload, fallback, ocrHints) : fallback
     const mergedAnalysis =
       analysis.inputType === 'chat_screenshot' && ocrHints?.lines?.length
-        ? {
-            ...analysis,
-            detectedText: analysis.detectedText?.length ? analysis.detectedText : ocrHints.lines.slice(0, 8),
-            lastOpponentMessage: pickBestOcrMessage([analysis.lastOpponentMessage, ...ocrHints.lines]) || '',
-            threadContextSuggestion:
-              analysis.threadContextSuggestion && !looksLikeNicknameLine(analysis.threadContextSuggestion)
-                ? analysis.threadContextSuggestion
-                : pickBestOcrMessage(ocrHints.lines) || '',
-            conversationTurns:
+        ? (() => {
+            const ocrTurns = buildConversationTurnsFromOcr(ocrHints.lines)
+            const normalizedTurns =
               Array.isArray(analysis.conversationTurns) &&
-              analysis.conversationTurns.some((turn) => !looksLikeNicknameLine(turn?.text))
-                ? analysis.conversationTurns.filter((turn) => !looksLikeNicknameLine(turn?.text))
-                : buildConversationTurnsFromOcr(ocrHints.lines),
-          }
+              analysis.conversationTurns.some((turn) => !looksLikeMetaLine(turn?.text))
+                ? analysis.conversationTurns.filter((turn) => !looksLikeMetaLine(turn?.text))
+                : ocrTurns
+            const mergedThreadContext =
+              analysis.threadContextSuggestion && !looksLikeMetaLine(analysis.threadContextSuggestion)
+                ? analysis.threadContextSuggestion
+                : buildThreadContextFromTurns(normalizedTurns) || pickBestOcrMessage(ocrHints.lines) || ''
+
+            return {
+              ...analysis,
+              detectedText: analysis.detectedText?.length ? analysis.detectedText : ocrHints.lines.slice(0, 8),
+              lastOpponentMessage: pickBestOcrMessage([analysis.lastOpponentMessage, ...ocrHints.lines]) || '',
+              threadContextSuggestion: mergedThreadContext,
+              conversationTurns: normalizedTurns,
+            }
+          })()
         : analysis
 
     response.json({
@@ -2300,6 +2617,178 @@ app.post('/api/battle/generate', async (request, response) => {
       debugReason,
     })
   }
+})
+
+app.post('/api/battle/follow-up', async (request, response) => {
+  const payload = request.body ?? {}
+  const chatHistory = Array.isArray(payload.chatHistory) ? payload.chatHistory : []
+  const battleStyleName = payload.battleStyleName || '阴阳怪气'
+  const relationshipId = payload.relationshipId || 'crush'
+  const inputAnalysis = payload.inputAnalysis || null
+  const battleTelemetry = payload.battleTelemetry || null
+  const selectedReply = typeof payload.selectedReply === 'string' ? payload.selectedReply : ''
+  const desiredOutcome = typeof payload.desiredOutcome === 'string' ? payload.desiredOutcome : ''
+  const threadContext = typeof payload.threadContext === 'string' ? payload.threadContext : ''
+  const opponentMessage = typeof payload.opponentMessage === 'string' ? payload.opponentMessage.trim() : ''
+  const lastAiMessage = [...chatHistory].reverse().find((m) => m.role === 'outgoing')?.text || ''
+  const lastOpponentMessage = [...chatHistory].reverse().find((m) => m.role === 'incoming')?.text || ''
+  const fullChatHistory = opponentMessage
+    ? [...chatHistory, { role: 'incoming', speaker: '对方', text: opponentMessage }]
+    : chatHistory
+
+  if (hasArk) {
+    try {
+      const outputSchema = {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          aiReply: { type: 'string' },
+          quickReplies: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['aiReply', 'quickReplies'],
+      }
+
+      const userContent = [
+        {
+          type: 'text',
+          text: [
+            '你正在模拟一个 QQ 社交斗图场景中的多轮对话。',
+            '',
+            '以下是当前对话历史：',
+            ...fullChatHistory.map((m) => `${m.speaker}：${m.text}`),
+            '',
+            `用户刚输入的对方新消息：${opponentMessage || lastOpponentMessage || '（暂无）'}`,
+            `最新一条我方回复：${selectedReply || lastAiMessage || '（暂无）'}`,
+            `原始输入类型：${inputAnalysis?.inputType || 'unknown'}`,
+            `原始输入主体：${inputAnalysis?.subject || '未知输入'}`,
+            `原始图片/截图信号：${inputAnalysis?.visualSummary || '暂无'}`,
+            `原始上一轮上下文：${inputAnalysis?.lastOpponentMessage || threadContext || '暂无'}`,
+            `当前表情包策略：${battleTelemetry?.memeGeneratorTemplate?.label || battleTelemetry?.memeTemplate?.label || '暂无'}`,
+            `当前反击切口：${battleTelemetry?.attackVector || '暂无'}`,
+            `斗图风格：${battleStyleName}`,
+            `关系距离：${relationships.find((r) => r.id === relationshipId)?.label || '暧昧对象'}`,
+            `用户偏好：${payload.focus || '像真人、够自然'}`,
+            `本轮目标：${desiredOutcome || '继续把梗接下去'}`,
+            '',
+            '现在不要替用户生成“对方下一句”，因为这句话已经由用户手动输入了。',
+            '请只生成：',
+            '1. aiReply：AI 推荐的下一句回法，要先接住用户刚输入的 opponentMessage，再延续当前风格和目标。',
+            '2. quickReplies：3 条备选回复（可直接发送的短句）',
+            '',
+            '要求：',
+            '- 用中文',
+            '- 要像真实 QQ 聊天，不要太书面',
+            '- 要有来有回的互动感，不要单方面输出，更不要突然跳戏到“评分”“打分”“话术库”“你准备了吧”这种元吐槽',
+            '- aiReply 尽量控制在 8-22 个中文字符内，像聊天气泡，不要写成长段说明',
+            '- 如果原图是报平安、轻微生病、卖萌表情包，就继续围绕这个语境接梗，不要忽然变成斗图裁判',
+            '- 如果原图是挑衅梗图，就继续在原来的挑衅点上往下推，不要改成泛泛互怼',
+            '- 只输出 JSON，不要 markdown',
+          ].join('\n'),
+        },
+      ]
+
+      const requestBase = {
+        model,
+        messages: [
+          {
+            role: 'system',
+            content: '你是一个擅长模拟 QQ 社交对话的 AI，能生成自然的多轮斗图对话。',
+          },
+          { role: 'user', content: userContent },
+        ],
+        thinking: { type: 'disabled' },
+        max_tokens: 800,
+        temperature: 0.9,
+      }
+
+      async function requestArk(useSchema) {
+        const resp = await fetch(arkBaseUrl + '/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + process.env.ARK_API_KEY,
+          },
+          body: JSON.stringify({
+            ...requestBase,
+            ...(useSchema
+              ? {
+                  response_format: {
+                    type: 'json_schema',
+                    json_schema: { name: 'follow_up_chat', schema: outputSchema, strict: true },
+                  },
+                }
+              : {}),
+          }),
+        })
+        if (!resp.ok) {
+          const errorText = await resp.text()
+          throw new Error(`ark_followup_failed ${resp.status} ${errorText}`)
+        }
+        return resp.json()
+      }
+
+      let data
+      try {
+        data = await requestArk(true)
+      } catch (e) {
+        if (/json_schema.*not supported|response_format\.type.*json_schema.*not supported/i.test(e.message)) {
+          data = await requestArk(false)
+        } else throw e
+      }
+
+      const text = data?.choices?.[0]?.message?.content?.trim()
+      if (text) {
+        const parsed = JSON.parse(cleanJsonText(text))
+        response.json({
+          ok: true,
+          aiReply: typeof parsed.aiReply === 'string' ? parsed.aiReply : '你先别急，让我想想怎么回你。',
+          quickReplies: Array.isArray(parsed.quickReplies) ? parsed.quickReplies.filter((r) => typeof r === 'string').slice(0, 3) : [],
+        })
+        return
+      }
+    } catch (e) {
+      console.error('follow-up ark failed', e)
+    }
+  }
+
+  // Fallback
+  const fallbackTopic =
+    inputAnalysis?.lastOpponentMessage ||
+    threadContext ||
+    lastOpponentMessage ||
+    inputAnalysis?.subject ||
+    '这张图'
+  const looksLikeHealthTopic = /热|烧|难受|困|睡|不严重|生病/u.test(
+    `${inputAnalysis?.lastOpponentMessage || ''} ${inputAnalysis?.visualSummary || ''} ${threadContext}`,
+  )
+  const aiReplies = looksLikeHealthTopic
+    ? [
+        '不夸，先看你这波装淡定能装多久',
+        '心疼归心疼，嘴硬我还是要记你一笔',
+        `你这句接得挺稳，但我先把“${fallbackTopic}”这事记下了`,
+      ]
+    : [
+        '我这句都发了，你不会真接不上吧',
+        '你敢继续接，我就敢顺着往下怼',
+        `先别急，我这波就是照着“${fallbackTopic}”往下接的`,
+      ]
+  const randIdx = (arr) => Math.floor(Math.random() * arr.length)
+
+  response.json({
+    ok: true,
+    aiReply: aiReplies[randIdx(aiReplies)],
+    quickReplies: [
+      looksLikeHealthTopic
+        ? '你这嘴硬劲儿我先记下了'
+        : lastAiMessage
+          ? `我这句都递过去了，你还真接啊`
+          : '你这波操作我确实没想到',
+      looksLikeHealthTopic
+        ? '不严重就继续嘴硬，我看你能装多久'
+        : `行，你这下算是把“${fallbackTopic}”接住了`,
+      looksLikeHealthTopic ? '先把自己顾好，再来跟我抬杠' : '别急，我下一句还没发完',
+    ],
+  })
 })
 
 app.listen(port, host, () => {
