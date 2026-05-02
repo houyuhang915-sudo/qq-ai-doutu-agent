@@ -1513,6 +1513,14 @@ function normalizeImageUrlForArk(imageUrl) {
   return imageUrl
 }
 
+function getImageDetailForProvider(provider) {
+  if (provider?.id === 'mimo') {
+    return 'high'
+  }
+
+  return 'xhigh'
+}
+
 function looksLikeChatScreenshotFromOcr(lines) {
   const usefulLines = Array.isArray(lines) ? lines.filter((line) => typeof line === 'string' && line.trim()) : []
   if (usefulLines.length >= 3) {
@@ -2474,7 +2482,7 @@ async function generateInputAnalysisWithArk(
       type: 'image_url',
       image_url: {
         url: normalizeImageUrlForArk(payload.imageDataUrl),
-        detail: 'xhigh',
+        detail: getImageDetailForProvider(provider),
       },
     })
   }

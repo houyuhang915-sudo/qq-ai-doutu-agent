@@ -1050,8 +1050,8 @@ export default function App() {
       if (payload.mode) {
         setHealth((current) => ({
           ...current,
-          ok: true,
-          mode: payload.mode ?? current.mode,
+          ok: payload.mode !== 'fallback' ? true : current.ok,
+          mode: payload.mode && payload.mode !== 'fallback' ? payload.mode : current.mode,
           providerId: payload.providerId ?? current.providerId,
           providerLabel: payload.providerLabel ?? current.providerLabel,
           model: payload.model ?? current.model,
@@ -1061,7 +1061,7 @@ export default function App() {
               ? payload.supportsImageInput
                 ? `后端已连接 ${payload.providerLabel || payload.mode}，可分析聊天截图和图片内容。`
                 : `后端已连接 ${payload.providerLabel || payload.mode}，当前模型按文本模式运行。`
-              : '当前后端运行在 fallback 模式，图片分析会退回演示逻辑。',
+              : current.message || '本次图片分析失败，已临时退回演示逻辑。',
         }))
       }
     } catch {
@@ -1275,8 +1275,8 @@ export default function App() {
       if (payload.mode) {
         setHealth((current) => ({
           ...current,
-          ok: true,
-          mode: payload.mode ?? current.mode,
+          ok: payload.mode !== 'fallback' ? true : current.ok,
+          mode: payload.mode && payload.mode !== 'fallback' ? payload.mode : current.mode,
           providerId: payload.providerId ?? current.providerId,
           providerLabel: payload.providerLabel ?? current.providerLabel,
           model: payload.model ?? current.model,
@@ -1286,7 +1286,7 @@ export default function App() {
               ? payload.supportsImageInput
                 ? `后端已连接 ${payload.providerLabel || payload.mode}，可按真实图片生成结构化结果。`
                 : `后端已连接 ${payload.providerLabel || payload.mode}，当前模型按文本模式运行。`
-              : '当前后端运行在 fallback 模式，便于无 key 情况下演示。',
+              : current.message || '本轮生成失败，已临时退回演示逻辑。',
         }))
       }
 
