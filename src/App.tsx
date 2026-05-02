@@ -61,7 +61,9 @@ type Experience = {
 
 type HealthState = {
   ok: boolean
-  mode: 'ark' | 'fallback' | 'unknown'
+  mode: 'ark' | 'mimo' | 'fallback' | 'unknown'
+  providerId?: 'ark' | 'mimo'
+  providerLabel?: string
   model?: string
   message: string
   supportsImageInput?: boolean
@@ -82,6 +84,7 @@ type BattleTelemetry = {
     strategy: string
     description: string
   }
+  renderedMemeDataUrl?: string | null
 }
 
 type MemeTemplate = {
@@ -125,6 +128,14 @@ type BattleLog = {
 }
 
 type SidebarTab = 'workbench' | 'library' | 'assets'
+
+type ProviderModelOption = {
+  id: string
+  providerId: 'ark' | 'mimo'
+  modelId: string
+  label: string
+  description: string
+}
 
 const demoScenes: Scene[] = [
   {
@@ -222,6 +233,30 @@ const relationships: Option[] = [
   { id: 'new-friend', label: '新认识的人', value: '友好带刺，避免一下子怼太满。' },
 ]
 
+const providerModelOptions: ProviderModelOption[] = [
+  {
+    id: 'ark:doubao-seed-2-0-pro-260215',
+    providerId: 'ark',
+    modelId: 'doubao-seed-2-0-pro-260215',
+    label: 'Ark · doubao-seed-2-0-pro-260215',
+    description: '当前默认多模态链路，适合图像理解与结构化回复。',
+  },
+  {
+    id: 'mimo:mimo-v2.5',
+    providerId: 'mimo',
+    modelId: 'mimo-v2.5',
+    label: 'MiMo · mimo-v2.5',
+    description: 'MiMo 原生多模态模型，支持图片理解与长上下文。',
+  },
+  {
+    id: 'mimo:mimo-v2-omni',
+    providerId: 'mimo',
+    modelId: 'mimo-v2-omni',
+    label: 'MiMo · mimo-v2-omni',
+    description: 'MiMo 全模态模型，适合更重的视觉 Agent 场景。',
+  },
+]
+
 const targetOptions: Option[] = [
   { id: 'target-stall', label: '让对方接不上', value: '让我回过去以后，对方一时半会儿接不上。' },
   { id: 'target-play', label: '继续陪我玩梗', value: '让我回过去以后，对方继续陪我玩梗，不要冷场。' },
@@ -299,6 +334,7 @@ type UserPreferences = {
   relationshipId: string
   focus: string
   desiredOutcome: string
+  providerModelId: string
   actionCount: number
   lastUsedAt: string
 }
@@ -559,6 +595,10 @@ export default function App() {
   const ammoPanelRef = useRef<HTMLElement | null>(null)
   const defaultFocus = savedPrefs.focus ?? focusOptions[0].value ?? ''
   const defaultDesiredOutcome = savedPrefs.desiredOutcome ?? targetOptions[1].value ?? ''
+  const defaultProviderModelId =
+    savedPrefs.providerModelId ??
+    providerModelOptions.find((item) => item.providerId === 'mimo')?.id ??
+    providerModelOptions[0].id
 
   const [sceneId, setSceneId] = useState(initialIds.sceneId)
   const [battleStyleId, setBattleStyleId] = useState(initialIds.battleStyleId)
@@ -567,6 +607,7 @@ export default function App() {
   const [focus, setFocus] = useState(defaultFocus)
   const [threadContext, setThreadContext] = useState('')
   const [desiredOutcome, setDesiredOutcome] = useState(defaultDesiredOutcome)
+  const [providerModelId, setProviderModelId] = useState(defaultProviderModelId)
   const [imageDataUrl, setImageDataUrl] = useState<string>('')
   const [imageName, setImageName] = useState('')
   const [inputAnalysis, setInputAnalysis] = useState<InputAnalysis | null>(null)
@@ -608,6 +649,10 @@ export default function App() {
   const battleStyle = getBattleStyle(battleStyleId)
   const context = getContext(contextId)
   const relationship = getRelationship(relationshipId)
+  const selectedProviderModel =
+    providerModelOptions.find((item) => item.id === providerModelId) ?? providerModelOptions[0]
+  const selectedProviderId = selectedProviderModel.providerId
+  const selectedModelId = selectedProviderModel.modelId
   const battleMode = getMode(battleStyle.modeId)
   const targetOption = getOptionByValue(targetOptions, desiredOutcome, targetOptions[1])
   const focusOption = getOptionByValue(focusOptions, focus, focusOptions[0])
@@ -721,7 +766,11 @@ export default function App() {
 
     const syncHealth = async (signal?: AbortSignal) => {
       try {
-        const response = await fetch('/api/health', { signal })
+        const params = new URLSearchParams({
+          providerId: selectedProviderId,
+          modelId: selectedModelId,
+        })
+        const response = await fetch(`/api/health?${params.toString()}`, { signal })
 
         if (!response.ok) {
           throw new Error('health request failed')
@@ -766,7 +815,7 @@ export default function App() {
       window.removeEventListener('pageshow', syncIfVisible)
       document.removeEventListener('visibilitychange', syncIfVisible)
     }
-  }, [])
+  }, [selectedModelId, selectedProviderId])
 
   useEffect(() => {
     if ('scrollRestoration' in window.history) {
@@ -851,8 +900,9 @@ export default function App() {
       relationshipId,
       focus,
       desiredOutcome,
+      providerModelId,
     })
-  }, [battleStyleId, contextId, relationshipId, focus, desiredOutcome])
+  }, [battleStyleId, contextId, relationshipId, focus, desiredOutcome, providerModelId])
 
   useLayoutEffect(() => {
     if (!shellRef.current) {
@@ -935,6 +985,8 @@ export default function App() {
       body: JSON.stringify({
         imageDataUrl: uploadUrl,
         imageName: name,
+        providerId: selectedProviderId,
+        modelId: selectedModelId,
         threadContext,
         focus,
         battleStyleId,
@@ -947,7 +999,10 @@ export default function App() {
 
     return (await response.json()) as {
       analysis: InputAnalysis
-      mode?: 'ark' | 'fallback'
+      mode?: 'ark' | 'mimo' | 'fallback'
+      providerId?: 'ark' | 'mimo'
+      providerLabel?: string
+      model?: string
       supportsImageInput?: boolean
       recommendedTemplates?: MemeTemplate[]
     }
@@ -997,12 +1052,15 @@ export default function App() {
           ...current,
           ok: true,
           mode: payload.mode ?? current.mode,
+          providerId: payload.providerId ?? current.providerId,
+          providerLabel: payload.providerLabel ?? current.providerLabel,
+          model: payload.model ?? current.model,
           supportsImageInput: payload.supportsImageInput ?? current.supportsImageInput,
           message:
-            payload.mode === 'ark'
+            payload.mode && payload.mode !== 'fallback'
               ? payload.supportsImageInput
-                ? '后端已连接火山方舟 Ark，可分析聊天截图和图片内容。'
-                : '后端已连接火山方舟 Ark，当前模型按文本模式运行。'
+                ? `后端已连接 ${payload.providerLabel || payload.mode}，可分析聊天截图和图片内容。`
+                : `后端已连接 ${payload.providerLabel || payload.mode}，当前模型按文本模式运行。`
               : '当前后端运行在 fallback 模式，图片分析会退回演示逻辑。',
         }))
       }
@@ -1132,6 +1190,8 @@ export default function App() {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
+        providerId: selectedProviderId,
+        modelId: selectedModelId,
         sceneId,
         modeId: battleStyle.modeId,
         battleStyleId,
@@ -1160,7 +1220,10 @@ export default function App() {
           experience: Experience
           battle?: BattleTelemetry
           analysis?: InputAnalysis
-          mode?: 'ark' | 'fallback'
+          mode?: 'ark' | 'mimo' | 'fallback'
+          providerId?: 'ark' | 'mimo'
+          providerLabel?: string
+          model?: string
           supportsImageInput?: boolean
         }
       })
@@ -1214,12 +1277,15 @@ export default function App() {
           ...current,
           ok: true,
           mode: payload.mode ?? current.mode,
+          providerId: payload.providerId ?? current.providerId,
+          providerLabel: payload.providerLabel ?? current.providerLabel,
+          model: payload.model ?? current.model,
           supportsImageInput: payload.supportsImageInput ?? current.supportsImageInput,
           message:
-            payload.mode === 'ark'
+            payload.mode && payload.mode !== 'fallback'
               ? payload.supportsImageInput
-                ? '后端已连接火山方舟 Ark，可按真实图片生成结构化结果。'
-                : '后端已连接火山方舟 Ark，当前模型按文本模式运行。'
+                ? `后端已连接 ${payload.providerLabel || payload.mode}，可按真实图片生成结构化结果。`
+                : `后端已连接 ${payload.providerLabel || payload.mode}，当前模型按文本模式运行。`
               : '当前后端运行在 fallback 模式，便于无 key 情况下演示。',
         }))
       }
@@ -1253,7 +1319,9 @@ export default function App() {
       setHasGenerated(true)
       recordPreferenceUsage()
       setToastMessage(
-        payload.mode === 'ark' ? 'Ark 已生成一版真实结果。' : '当前展示的是 fallback 版反击结果。',
+        payload.mode && payload.mode !== 'fallback'
+          ? `${payload.providerLabel || payload.mode} 已生成一版真实结果。`
+          : '当前展示的是 fallback 版反击结果。',
       )
 
       // Initialize chat history for multi-turn preview
@@ -1305,6 +1373,8 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          providerId: selectedProviderId,
+          modelId: selectedModelId,
           chatHistory,
           battleStyleId,
           battleStyleName: battleStyle.name,
@@ -1427,10 +1497,14 @@ export default function App() {
           </div>
 
           <div className="battle-status-row">
-            <span className={`battle-chip ${health.mode === 'ark' ? 'is-online' : health.mode === 'fallback' ? 'is-warn' : ''}`}>
+            <span
+              className={`battle-chip ${
+                health.mode !== 'fallback' && health.mode !== 'unknown' ? 'is-online' : health.mode === 'fallback' ? 'is-warn' : ''
+              }`}
+            >
               <strong>Backend</strong>
-              {health.mode === 'ark'
-                ? `Ark${health.model ? ` · ${health.model}` : ''}`
+              {health.mode !== 'fallback' && health.mode !== 'unknown'
+                ? `${health.providerLabel || selectedProviderModel.providerId}${health.model ? ` · ${health.model}` : ''}`
                 : health.mode === 'fallback'
                   ? 'Fallback'
                   : 'Checking'}
@@ -1497,6 +1571,20 @@ export default function App() {
                   Agent 决策面板
                 </h2>
                 <p>Agent 先自动判断，再允许你做少量人工微调。</p>
+              </div>
+
+              <div className="provider-control-bar">
+                <label className="provider-select-field">
+                  <span>模型选项</span>
+                  <select value={providerModelId} onChange={(event) => setProviderModelId(event.target.value)}>
+                    {providerModelOptions.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                  <small className="battle-note-meta">{selectedProviderModel.description}</small>
+                </label>
               </div>
 
               <div className="agent-plan-grid">

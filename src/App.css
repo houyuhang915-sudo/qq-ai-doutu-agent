@@ -660,6 +660,34 @@ body,
   margin-top: 14px;
 }
 
+.provider-control-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin: 8px 0 14px;
+}
+
+.provider-select-field {
+  display: grid;
+  gap: 7px;
+  max-width: 420px;
+}
+
+.provider-select-field span {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.provider-select-field select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(71, 85, 105, 0.72);
+  background: rgba(15, 23, 42, 0.86);
+  color: #e2e8f0;
+}
+
 .battle-config-grid label,
 .battle-notes label {
   display: grid;
@@ -1503,6 +1531,10 @@ body,
   .skill-loadout {
     grid-template-columns: 1fr;
   }
+
+  .provider-control-bar {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
@@ -1521,6 +1553,7 @@ body,
   }
 
   .battle-config-grid,
+  .provider-control-bar,
   .agent-plan-grid,
   .tactic-grid,
   .pipeline-row {

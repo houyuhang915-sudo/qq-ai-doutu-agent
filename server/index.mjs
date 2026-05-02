@@ -2,31 +2,126 @@ import express from 'express'
 import {
   Resources as MemeResources,
   getMeme as getGeneratedMeme,
+  getMemes,
 } from '@memecrafters/meme-generator'
 import { execFile as execFileCallback } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 const execFile = promisify(execFileCallback)
+const staticReplyMemePreviewKeys = new Set(
+  readdirSync(join(process.cwd(), 'public', 'reply-meme-previews'))
+    .filter((name) => name.endsWith('.png'))
+    .map((name) => name.replace(/\.png$/i, '')),
+)
+const excludedStaticReplyMemeKeys = new Set([
+  'always_like',
+  'support',
+  'need',
+  'raise_image',
+  'google_captcha',
+])
+
+function resolveMimoBaseUrl(apiKey, configuredBaseUrl) {
+  const trimmedKey = String(apiKey || '').trim()
+  const trimmedBaseUrl = String(configuredBaseUrl || '').trim()
+
+  if (!trimmedKey.startsWith('tp-')) {
+    return trimmedBaseUrl || 'https://api.xiaomimimo.com/v1'
+  }
+
+  if (!trimmedBaseUrl || /api\.xiaomimimo\.com\/v1$/i.test(trimmedBaseUrl)) {
+    return 'https://token-plan-cn.xiaomimimo.com/v1'
+  }
+
+  return trimmedBaseUrl
+}
 
 const app = express()
 const host = '127.0.0.1'
 const port = Number(process.env.PORT || 8787)
-const model = process.env.ARK_ENDPOINT_ID || process.env.ARK_MODEL || 'doubao-seed-2-0-pro-260215'
-const arkBaseUrl = process.env.ARK_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3'
-const hasArk = Boolean(process.env.ARK_API_KEY)
-const usingEndpoint = Boolean(process.env.ARK_ENDPOINT_ID)
-const supportsImageInput = process.env.ARK_SUPPORTS_IMAGE
-  ? process.env.ARK_SUPPORTS_IMAGE === 'true'
-  : /vision|seed|vlm|image|video/i.test(model)
-let arkProbe = {
-  checked: false,
-  ok: false,
-  message: hasArk
-    ? '正在检查 Ark 可用性。'
-    : '后端正在 fallback 模式下运行，没有 key 也能完成演示。',
+
+const providerCatalog = {
+  ark: {
+    id: 'ark',
+    label: 'Ark',
+    apiKey: process.env.ARK_API_KEY || '',
+    baseUrl: process.env.ARK_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3',
+    defaultModel: process.env.ARK_ENDPOINT_ID || process.env.ARK_MODEL || 'doubao-seed-2-0-pro-260215',
+    supportsImageEnv: process.env.ARK_SUPPORTS_IMAGE,
+    usingEndpoint: Boolean(process.env.ARK_ENDPOINT_ID),
+  },
+  mimo: {
+    id: 'mimo',
+    label: 'MiMo',
+    apiKey: process.env.MIMO_API_KEY || '',
+    baseUrl: resolveMimoBaseUrl(
+      process.env.MIMO_API_KEY || '',
+      process.env.MIMO_BASE_URL || 'https://api.xiaomimimo.com/v1',
+    ),
+    defaultModel: process.env.MIMO_MODEL || 'mimo-v2.5',
+    supportsImageEnv: process.env.MIMO_SUPPORTS_IMAGE,
+    usingEndpoint: false,
+  },
+}
+
+const defaultProviderId =
+  process.env.DEFAULT_MODEL_PROVIDER ||
+  (providerCatalog.ark.apiKey
+    ? 'ark'
+    : providerCatalog.mimo.apiKey
+      ? 'mimo'
+      : 'ark')
+
+function isProviderConfigured(provider) {
+  return Boolean(provider?.apiKey)
+}
+
+function getRequestedProviderId(preferredProviderId) {
+  if (preferredProviderId && providerCatalog[preferredProviderId]) {
+    return preferredProviderId
+  }
+  return defaultProviderId
+}
+
+function getProviderConfig(preferredProviderId, preferredModel) {
+  const providerId = getRequestedProviderId(preferredProviderId)
+  const provider = providerCatalog[providerId] || providerCatalog[defaultProviderId]
+  return {
+    ...provider,
+    model: preferredModel || provider.defaultModel,
+  }
+}
+
+function supportsImageForProvider(provider, modelOverride = provider?.model) {
+  if (provider?.supportsImageEnv) {
+    return provider.supportsImageEnv === 'true'
+  }
+
+  if (provider?.id === 'mimo') {
+    return /mimo-v2\.5|mimo-v2-omni/i.test(modelOverride || '')
+  }
+
+  return /vision|seed|vlm|image|video/i.test(modelOverride || '')
+}
+
+function createProbeState(providerId) {
+  const provider = getProviderConfig(providerId)
+  return {
+    checked: false,
+    ok: false,
+    message: isProviderConfigured(provider)
+      ? `正在检查 ${provider.label} 可用性。`
+      : `${provider.label} 未配置 API Key，当前使用 fallback 演示。`,
+  }
+}
+
+const providerProbes = {
+  ark: createProbeState('ark'),
+  mimo: createProbeState('mimo'),
 }
 
 app.use(express.json({ limit: '20mb' }))
@@ -208,7 +303,7 @@ const agentSkills = [
   },
 ]
 
-const memeGeneratorTemplates = [
+const curatedMemeGeneratorTemplates = [
   {
     key: 'cover_face',
     label: '捂脸',
@@ -490,6 +585,51 @@ const memeGeneratorTemplates = [
     description: '无字踩场图，适合明显挑衅或故意找事时强势压回去。',
   },
 ]
+
+function humanizeMemeKey(key = '') {
+  return String(key)
+    .split('_')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function buildAutoMemeDescription(meme) {
+  const keywords = Array.isArray(meme?.info?.keywords) ? meme.info.keywords.filter(Boolean) : []
+  const primary = keywords[0] || humanizeMemeKey(meme?.key || '')
+  return `自动接入的无字回复图模板，适合围绕「${primary}」这类语境做回图，文字单独发送。`
+}
+
+function buildDynamicMemeGeneratorTemplates() {
+  const existingKeys = new Set(curatedMemeGeneratorTemplates.map((item) => item.key))
+  const dynamicTemplates = getMemes()
+    .filter((meme) => {
+      const params = meme?.info?.params || {}
+      return (
+        !existingKeys.has(meme.key) &&
+        staticReplyMemePreviewKeys.has(meme.key) &&
+        !excludedStaticReplyMemeKeys.has(meme.key) &&
+        params.minImages === 1 &&
+        params.maxImages === 1 &&
+        params.minTexts === 0
+      )
+    })
+    .map((meme) => ({
+      key: meme.key,
+      label: meme.info?.keywords?.[0] || humanizeMemeKey(meme.key),
+      strategy: 'image_based',
+      fitInputs: ['chat_screenshot', 'meme', 'photo', 'mixed', 'unknown'],
+      fitStyles: ['sarcastic', 'aggressive', 'cute', 'brainhole'],
+      description: buildAutoMemeDescription(meme),
+      source: 'dynamic',
+    }))
+
+  return [...curatedMemeGeneratorTemplates, ...dynamicTemplates]
+}
+
+const memeGeneratorTemplates = buildDynamicMemeGeneratorTemplates().filter(
+  (item) => staticReplyMemePreviewKeys.has(item.key) && !excludedStaticReplyMemeKeys.has(item.key),
+)
 
 let memeGeneratorReadyPromise
 
@@ -1161,7 +1301,10 @@ function normalizeExperience(candidate, fallback) {
 function buildFallbackInputAnalysis(payload, ocrHints = null) {
   const inputType = ocrHints?.suggestScreenshot ? 'chat_screenshot' : inferInputType(payload)
   const ocrBestMessage = pickBestOcrMessage(ocrHints?.lines || [])
-  const ocrConversationTurns = buildConversationTurnsFromOcr(ocrHints?.lines || [])
+  const ocrTurnsFromBlocks = buildConversationTurnsFromOcrBlocks(ocrHints?.blocks || [])
+  const ocrConversationTurns = ocrTurnsFromBlocks.length
+    ? ocrTurnsFromBlocks
+    : buildConversationTurnsFromOcr(ocrHints?.lines || [])
   const ocrThreadContext = buildThreadContextFromTurns(ocrConversationTurns)
   const lightweightAnalysis = {
     inputType,
@@ -1181,7 +1324,7 @@ function buildFallbackInputAnalysis(payload, ocrHints = null) {
       : ''
   const lastOpponentMessage =
     inputType === 'chat_screenshot'
-      ? payload.threadContext?.trim() || ocrBestMessage || '你看看这波是不是拿捏了。'
+      ? payload.threadContext?.trim() || ocrBestMessage || ''
       : ''
 
   return {
@@ -1196,7 +1339,7 @@ function buildFallbackInputAnalysis(payload, ocrHints = null) {
       inputType === 'chat_screenshot'
         ? payload.threadContext?.trim()
           ? [payload.threadContext.trim()]
-          : ocrHints?.lines?.slice(0, 8) || []
+          : ocrConversationTurns.map((turn) => turn.text).slice(0, 8)
         : [],
     conversationTurns:
       inputType === 'chat_screenshot' && lastOpponentMessage
@@ -1376,8 +1519,16 @@ function looksLikeChatScreenshotFromOcr(lines) {
     return true
   }
 
+  if (usefulLines.length >= 2) {
+    const firstLine = String(usefulLines[0] || '').trim()
+    const remainingConversation = extractConversationTextLines(usefulLines.slice(1))
+    if (looksLikeNicknameLine(firstLine) && remainingConversation.length) {
+      return true
+    }
+  }
+
   const text = usefulLines.join(' ')
-  if (/QQ|微信|昨|今天|晚安|睡|在吗|干嘛|哈哈|？|。|：/u.test(text) && usefulLines.length >= 2) {
+  if (/QQ|微信|昨|今天|晚安|睡|在吗|干嘛|哈哈|[？。！，：]/u.test(text) && usefulLines.length >= 2) {
     return true
   }
 
@@ -1398,8 +1549,21 @@ function looksLikeNicknameLine(line) {
     return true
   }
 
-  const hasConversationPunctuation = /[，。！？?~～]/u.test(text)
-  const hasConversationWords = /(我|你|他|她|它|不是|有点|今天|昨晚|严重|轻微|发热|发烧|睡|吃|来|去|在吗|哈哈)/u.test(text)
+  const hasConversationPunctuation = /[，。！？?~～、；：“”"'‘’（）()]/u.test(text)
+  const hasConversationWords =
+    /(不是|有点|今天|昨天|前天|昨晚|严重|轻微|发热|发烧|睡觉|睡了|吃饭|来找我|给你穿|在吗|干嘛|哈哈|呵呵|可以|好的|收到|晚安|早安|不理我|喜欢你|奶茶|裤子|长裤|衣服|谁|什么|怎么|咋|哪|吗|呀|啊|呢|吧|啦|来找|给我|给你|找我|找你|派对|我|你|他|她)/u.test(
+      text,
+    )
+
+  const looksLikeShortDisplayName =
+    /^[\p{Script=Han}A-Za-z0-9_·•-]{1,8}$/u.test(text) &&
+    !/\d/.test(text) &&
+    !hasConversationPunctuation &&
+    !hasConversationWords
+
+  if (looksLikeShortDisplayName) {
+    return true
+  }
 
   if (!hasConversationPunctuation && !hasConversationWords && text.length >= 14) {
     return true
@@ -1433,13 +1597,56 @@ function looksLikeMetaLine(line) {
   return looksLikeNicknameLine(line) || looksLikeTimestampLine(line)
 }
 
+function normalizeConversationText(line) {
+  let text = String(line || '').trim()
+  if (!text) {
+    return ''
+  }
+
+  text = text
+    .replace(/^(对方|我|Ta|TA|ta)\s*[：:]\s*/u, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (!text) {
+    return ''
+  }
+
+  const nestedSpeakerMatch = text.match(/(?:^|\s)(?:对方|我|Ta|TA|ta)\s*[：:]\s*(.+)$/u)
+  if (nestedSpeakerMatch?.[1]) {
+    text = nestedSpeakerMatch[1].trim()
+  }
+
+  if (!text) {
+    return ''
+  }
+
+  const nicknamePrefixMatch = text.match(
+    /^([\p{Script=Han}A-Za-z0-9_·•-]{1,8})\s+(.*)$/u,
+  )
+  if (nicknamePrefixMatch?.[1] && nicknamePrefixMatch?.[2]) {
+    const possibleName = nicknamePrefixMatch[1].trim()
+    const remainder = nicknamePrefixMatch[2].trim()
+    if (looksLikeNicknameLine(possibleName) && !looksLikeMetaLine(remainder)) {
+      text = remainder
+    }
+  }
+
+  return text.trim()
+}
+
 function pickBestOcrMessage(lines) {
   const usefulLines = Array.isArray(lines)
     ? lines.filter((line) => typeof line === 'string' && line.trim())
     : []
 
-  const nonMetaLines = usefulLines.filter((line) => !looksLikeMetaLine(line))
-  const targetPool = nonMetaLines.length ? nonMetaLines : usefulLines
+  const normalizedLines = usefulLines
+    .map((line) => normalizeConversationText(line))
+    .filter((line) => line && !looksLikeMetaLine(line))
+
+  const targetPool = normalizedLines.length
+    ? normalizedLines
+    : usefulLines.map((line) => normalizeConversationText(line)).filter(Boolean)
   return targetPool[targetPool.length - 1] || ''
 }
 
@@ -1448,8 +1655,29 @@ function extractConversationTextLines(lines) {
     ? lines.filter((line) => typeof line === 'string' && line.trim())
     : []
 
-  const nonMetaLines = usefulLines.filter((line) => !looksLikeMetaLine(line))
-  const targetPool = nonMetaLines.length ? nonMetaLines : usefulLines
+  const normalizedLines = usefulLines
+    .map((line) => normalizeConversationText(line))
+    .filter(Boolean)
+  const baseMetaLines = new Set(normalizedLines.filter((line) => looksLikeMetaLine(line)))
+  const subsetMetaLines = new Set(
+    normalizedLines.filter((line) => {
+      if (looksLikeMetaLine(line)) {
+        return false
+      }
+
+      return normalizedLines.some(
+        (other) =>
+          other !== line &&
+          looksLikeMetaLine(other) &&
+          other.includes(line) &&
+          line.length <= 8,
+      )
+    }),
+  )
+  const nonMetaLines = normalizedLines.filter(
+    (line) => !baseMetaLines.has(line) && !subsetMetaLines.has(line),
+  )
+  const targetPool = nonMetaLines.length ? nonMetaLines : normalizedLines
 
   return targetPool
     .map((line) => String(line).trim())
@@ -1478,6 +1706,79 @@ function buildThreadContextFromTurns(turns) {
   return normalizedTurns.map((turn) => `${turn.speaker}：${turn.text}`).join('\n')
 }
 
+function buildConversationTurnsFromOcrBlocks(blocks) {
+  const normalizedBlocks = Array.isArray(blocks)
+    ? blocks
+        .map((block) => ({
+          text: normalizeConversationText(block?.text),
+          minX: Number(block?.minX ?? 0),
+          minY: Number(block?.minY ?? 0),
+          maxX: Number(block?.maxX ?? 0),
+          maxY: Number(block?.maxY ?? 0),
+        }))
+        .filter((block) => block.text)
+        .sort((a, b) => {
+          if (Math.abs(b.maxY - a.maxY) > 0.015) {
+            return b.maxY - a.maxY
+          }
+
+          return a.minX - b.minX
+        })
+    : []
+
+  const filteredBlocks = normalizedBlocks.filter((block) => !looksLikeMetaLine(block.text))
+  const turns = []
+  let current = null
+
+  function flushCurrent() {
+    if (current?.textParts?.length) {
+      const text = current.textParts.join(' ').replace(/\s+/g, ' ').trim()
+      if (text) {
+        turns.push({ speaker: '对方', text })
+      }
+    }
+    current = null
+  }
+
+  for (const block of filteredBlocks) {
+    if (!current) {
+      current = {
+        textParts: [block.text],
+        anchorX: block.minX,
+        bottom: block.minY,
+      }
+      continue
+    }
+
+    const verticalGap = current.bottom - block.maxY
+    const horizontalGap = Math.abs(block.minX - current.anchorX)
+    const shouldMerge =
+      horizontalGap <= 0.12 &&
+      verticalGap >= -0.02 &&
+      verticalGap <= 0.085
+
+    if (shouldMerge) {
+      current.textParts.push(block.text)
+      current.bottom = Math.min(current.bottom, block.minY)
+      current.anchorX = Math.min(current.anchorX, block.minX)
+    } else {
+      flushCurrent()
+      current = {
+        textParts: [block.text],
+        anchorX: block.minX,
+        bottom: block.minY,
+      }
+    }
+  }
+
+  flushCurrent()
+
+  return turns
+    .filter((turn) => turn.text && !looksLikeMetaLine(turn.text))
+    .filter((turn, index, arr) => arr.findIndex((item) => item.text === turn.text) === index)
+    .slice(0, 8)
+}
+
 async function runLocalOcr(imageDataUrl, imageName = 'upload.png') {
   const image = dataUrlToImageBuffer(imageDataUrl, imageName)
   if (!image) {
@@ -1499,15 +1800,28 @@ async function runLocalOcr(imageDataUrl, imageName = 'upload.png') {
     const lines = Array.isArray(parsed.lines)
       ? parsed.lines.filter((line) => typeof line === 'string' && line.trim()).slice(0, 12)
       : []
+    const blocks = Array.isArray(parsed.blocks)
+      ? parsed.blocks
+          .map((block) => ({
+            text: typeof block?.text === 'string' ? block.text.trim() : '',
+            minX: Number(block?.minX ?? 0),
+            minY: Number(block?.minY ?? 0),
+            maxX: Number(block?.maxX ?? 0),
+            maxY: Number(block?.maxY ?? 0),
+          }))
+          .filter((block) => block.text)
+          .slice(0, 24)
+      : []
 
     return {
       ok: Boolean(parsed.ok),
       lines,
+      blocks,
       fullText: typeof parsed.fullText === 'string' ? parsed.fullText : lines.join('\n'),
       suggestScreenshot: looksLikeChatScreenshotFromOcr(lines),
     }
   } catch {
-    return { ok: false, lines: [], fullText: '', suggestScreenshot: false }
+    return { ok: false, lines: [], blocks: [], fullText: '', suggestScreenshot: false }
   } finally {
     await rm(tempDir, { recursive: true, force: true })
   }
@@ -1568,6 +1882,44 @@ async function tryGenerateMemeWithLibrary({
     template,
     dataUrl: `data:image/png;base64,${result.field0.toString('base64')}`,
   }
+}
+
+async function buildReplyMemeRenderDataUrl({
+  templateKey,
+  caption,
+  imageDataUrl,
+  imageName,
+}) {
+  try {
+    const generated = await tryGenerateMemeWithLibrary({
+      templateKey,
+      caption,
+      imageDataUrl,
+      imageName,
+    })
+    if (generated?.dataUrl) {
+      return generated.dataUrl
+    }
+  } catch {
+    // ignore and fall back to null
+  }
+
+  return null
+}
+
+async function renderMemePreviewBuffer(templateKey) {
+  await ensureMemeGeneratorReady()
+  const meme = getGeneratedMeme(templateKey)
+  if (!meme) {
+    return null
+  }
+
+  const result = meme.generatePreview()
+  if (result.type !== 'Ok') {
+    return null
+  }
+
+  return result.field0
 }
 
 function buildRenderedMemeDataUrl({
@@ -1770,67 +2122,108 @@ function cleanJsonText(text) {
     .replace(/\s*```$/i, '')
 }
 
-async function probeArkAccess() {
-  if (!hasArk) {
-    arkProbe = {
-      checked: true,
-      ok: false,
-      message: '后端正在 fallback 模式下运行，没有 key 也能完成演示。',
-    }
-    return arkProbe
-  }
-
-  try {
-    const response = await fetch(`${arkBaseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.ARK_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: '请只回复ok' }],
-        thinking: {
-          type: 'disabled',
-        },
-        max_tokens: 16,
-      }),
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      const needsEndpoint =
-        /ModelNotOpen|AccessDisabled|InvalidEndpointOrModel/i.test(errorText) && !usingEndpoint
-
-      arkProbe = {
-        checked: true,
-        ok: false,
-        message: needsEndpoint
-          ? 'Ark key 已配置，但当前模型未开通。请在方舟控制台开通模型，或改用 ep- 开头的 Endpoint ID。'
-          : `Ark key 已配置，但当前资源不可用，已自动退回 fallback。`,
-      }
-      return arkProbe
-    }
-
-    arkProbe = {
-      checked: true,
-      ok: true,
-      message: supportsImageInput
-        ? '后端已连接火山方舟 Ark，可根据图片生成结构化回复。'
-        : '后端已连接火山方舟 Ark。当前模型按文本模式运行，适合先验证链路。',
-    }
-    return arkProbe
-  } catch {
-    arkProbe = {
-      checked: true,
-      ok: false,
-      message: 'Ark 探测失败，当前已退回 fallback。请检查网络、模型开通状态或 Endpoint 配置。',
-    }
-    return arkProbe
+function buildProviderHeaders(provider) {
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${provider.apiKey}`,
   }
 }
 
-async function generateWithArk(payload, fallback) {
+function buildChatCompletionsUrl(provider) {
+  return `${provider.baseUrl.replace(/\/$/, '')}/chat/completions`
+}
+
+function prepareProviderRequestBody(provider, body) {
+  const requestBody = {
+    ...body,
+    model: body.model || provider.model,
+  }
+
+  if (provider.id === 'mimo') {
+    if (requestBody.max_tokens && !requestBody.max_completion_tokens) {
+      requestBody.max_completion_tokens = requestBody.max_tokens
+    }
+    delete requestBody.max_tokens
+    delete requestBody.thinking
+  } else if (provider.id === 'ark') {
+    if (requestBody.max_completion_tokens && !requestBody.max_tokens) {
+      requestBody.max_tokens = requestBody.max_completion_tokens
+    }
+  }
+
+  return requestBody
+}
+
+async function requestProviderChatCompletion(provider, body) {
+  const response = await fetch(buildChatCompletionsUrl(provider), {
+    method: 'POST',
+    headers: buildProviderHeaders(provider),
+    body: JSON.stringify(prepareProviderRequestBody(provider, body)),
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(`${provider.id}_request_failed ${response.status} ${errorText}`)
+  }
+
+  return response.json()
+}
+
+async function probeProviderAccess(preferredProviderId, preferredModel) {
+  const provider = getProviderConfig(preferredProviderId, preferredModel)
+
+  if (!isProviderConfigured(provider)) {
+    providerProbes[provider.id] = {
+      checked: true,
+      ok: false,
+      message: `${provider.label} 未配置 API Key，当前使用 fallback 演示。`,
+    }
+    return providerProbes[provider.id]
+  }
+
+  try {
+    await requestProviderChatCompletion(provider, {
+      model: provider.model,
+      messages: [{ role: 'user', content: '请只回复ok' }],
+      thinking: {
+        type: 'disabled',
+      },
+      max_tokens: 16,
+    })
+
+    providerProbes[provider.id] = {
+      checked: true,
+      ok: true,
+      message: supportsImageForProvider(provider)
+        ? `后端已连接 ${provider.label}，可根据图片生成结构化回复。`
+        : `后端已连接 ${provider.label}。当前模型按文本模式运行，适合先验证链路。`,
+    }
+    return providerProbes[provider.id]
+  } catch (error) {
+    const errorText = error instanceof Error ? error.message : String(error)
+    const needsEndpoint =
+      provider.id === 'ark' &&
+      /ModelNotOpen|AccessDisabled|InvalidEndpointOrModel/i.test(errorText) &&
+      !provider.usingEndpoint
+    const invalidKey = /invalid[_ ]key|Invalid API Key|401/i.test(errorText)
+    const accountOverdue = /AccountOverdueError|overdue balance|Forbidden/i.test(errorText)
+
+    providerProbes[provider.id] = {
+      checked: true,
+      ok: false,
+      message: needsEndpoint
+        ? 'Ark key 已配置，但当前模型未开通。请在方舟控制台开通模型，或改用 ep- 开头的 Endpoint ID。'
+        : invalidKey
+          ? `${provider.label} API Key 无效，当前已退回 fallback。请检查你填入的 key 是否正确可用。`
+          : accountOverdue
+            ? `${provider.label} 账号当前不可用（如欠费/逾期），当前已退回 fallback。`
+        : `${provider.label} 探测失败，当前已退回 fallback。请检查网络、模型开通状态或 API Key / Base URL 配置。`,
+    }
+    return providerProbes[provider.id]
+  }
+}
+
+async function generateWithArk(payload, fallback, provider = getProviderConfig(payload.providerId, payload.modelId)) {
   const outputSchema = {
     type: 'object',
     additionalProperties: false,
@@ -1918,7 +2311,7 @@ async function generateWithArk(payload, fallback) {
     },
   ]
 
-  if (payload.imageDataUrl && supportsImageInput) {
+  if (payload.imageDataUrl && supportsImageForProvider(provider)) {
     userContent.push({
       type: 'image_url',
       image_url: {
@@ -1929,7 +2322,7 @@ async function generateWithArk(payload, fallback) {
   }
 
   const requestBase = {
-    model,
+    model: provider.model,
     messages: [
       {
         role: 'system',
@@ -1941,44 +2334,34 @@ async function generateWithArk(payload, fallback) {
         content: userContent,
       },
     ],
-    thinking: {
-      type: 'disabled',
-    },
     max_tokens: 1200,
     temperature: 0.7,
   }
 
   async function requestArk(useSchema) {
-    const response = await fetch(arkBaseUrl + '/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + process.env.ARK_API_KEY,
-      },
-      body: JSON.stringify({
-        ...requestBase,
-        ...(useSchema
-          ? {
-              response_format: {
-                type: 'json_schema',
-                json_schema: {
-                  name: 'mirror_reply_experience',
-                  description: 'QQ 发图回复场景下的结构化 AI 生成结果',
-                  schema: outputSchema,
-                  strict: true,
-                },
+    return requestProviderChatCompletion(provider, {
+      ...requestBase,
+      ...(provider.id === 'ark'
+        ? {
+            thinking: {
+              type: 'disabled',
+            },
+          }
+        : {}),
+      ...(useSchema
+        ? {
+            response_format: {
+              type: 'json_schema',
+              json_schema: {
+                name: 'mirror_reply_experience',
+                description: 'QQ 发图回复场景下的结构化 AI 生成结果',
+                schema: outputSchema,
+                strict: true,
               },
-            }
-          : {}),
-      }),
+            },
+          }
+        : {}),
     })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error('ark_request_failed ' + response.status + ' ' + errorText)
-    }
-
-    return response.json()
   }
 
   let data
@@ -2006,7 +2389,12 @@ async function generateWithArk(payload, fallback) {
   }
 }
 
-async function generateInputAnalysisWithArk(payload, fallback, ocrHints = null) {
+async function generateInputAnalysisWithArk(
+  payload,
+  fallback,
+  ocrHints = null,
+  provider = getProviderConfig(payload.providerId, payload.modelId),
+) {
   const outputSchema = {
     type: 'object',
     additionalProperties: false,
@@ -2081,7 +2469,7 @@ async function generateInputAnalysisWithArk(payload, fallback, ocrHints = null) 
     },
   ]
 
-  if (payload.imageDataUrl && supportsImageInput && !ocrHints?.suggestScreenshot) {
+  if (payload.imageDataUrl && supportsImageForProvider(provider) && !ocrHints?.suggestScreenshot) {
     userContent.push({
       type: 'image_url',
       image_url: {
@@ -2092,7 +2480,7 @@ async function generateInputAnalysisWithArk(payload, fallback, ocrHints = null) 
   }
 
   const requestBase = {
-    model,
+    model: provider.model,
     messages: [
       {
         role: 'system',
@@ -2104,44 +2492,34 @@ async function generateInputAnalysisWithArk(payload, fallback, ocrHints = null) 
         content: userContent,
       },
     ],
-    thinking: {
-      type: 'disabled',
-    },
     max_tokens: 1200,
     temperature: 0.35,
   }
 
   async function requestArk(useSchema) {
-    const response = await fetch(arkBaseUrl + '/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + process.env.ARK_API_KEY,
-      },
-      body: JSON.stringify({
-        ...requestBase,
-        ...(useSchema
-          ? {
-              response_format: {
-                type: 'json_schema',
-                json_schema: {
-                  name: 'battle_input_analysis',
-                  description: '上传图片的输入类型识别和聊天上下文抽取结果',
-                  schema: outputSchema,
-                  strict: true,
-                },
+    return requestProviderChatCompletion(provider, {
+      ...requestBase,
+      ...(provider.id === 'ark'
+        ? {
+            thinking: {
+              type: 'disabled',
+            },
+          }
+        : {}),
+      ...(useSchema
+        ? {
+            response_format: {
+              type: 'json_schema',
+              json_schema: {
+                name: 'battle_input_analysis',
+                description: '上传图片的输入类型识别和聊天上下文抽取结果',
+                schema: outputSchema,
+                strict: true,
               },
-            }
-          : {}),
-      }),
+            },
+          }
+        : {}),
     })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error('ark_analysis_request_failed ' + response.status + ' ' + errorText)
-    }
-
-    return response.json()
   }
 
   let data
@@ -2169,13 +2547,13 @@ async function generateInputAnalysisWithArk(payload, fallback, ocrHints = null) 
   }
 }
 
-async function generateBattleWithArk(payload, fallback) {
+async function generateBattleWithArk(payload, fallback, provider = getProviderConfig(payload.providerId, payload.modelId)) {
   const battleStyleName = payload.battleStyleName || '阴阳怪气'
   const inputFallback = buildFallbackInputAnalysis(payload)
   const inputAnalysis =
     payload.inputAnalysis && typeof payload.inputAnalysis === 'object'
       ? normalizeInputAnalysis(payload.inputAnalysis, inputFallback)
-      : await generateInputAnalysisWithArk(payload, inputFallback)
+      : await generateInputAnalysisWithArk(payload, inputFallback, null, provider)
   const battleFallback = buildFallbackBattleOutput(payload, fallback)
   const skillLoadout = getSkillLoadout(payload, inputAnalysis.inputType, payload.battleStyleId)
   const communicationMove = getCommunicationMove(payload, inputAnalysis, payload.battleStyleId)
@@ -2333,7 +2711,7 @@ async function generateBattleWithArk(payload, fallback) {
 
   if (
     payload.imageDataUrl &&
-    supportsImageInput &&
+    supportsImageForProvider(provider) &&
     inputAnalysis.inputType !== 'chat_screenshot' &&
     !payload.inputAnalysis
   ) {
@@ -2347,7 +2725,7 @@ async function generateBattleWithArk(payload, fallback) {
   }
 
   const requestBase = {
-    model,
+    model: provider.model,
     messages: [
       {
         role: 'system',
@@ -2359,44 +2737,34 @@ async function generateBattleWithArk(payload, fallback) {
         content: userContent,
       },
     ],
-    thinking: {
-      type: 'disabled',
-    },
     max_tokens: 1400,
     temperature: 0.85,
   }
 
   async function requestArk(useSchema) {
-    const response = await fetch(arkBaseUrl + '/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + process.env.ARK_API_KEY,
-      },
-      body: JSON.stringify({
-        ...requestBase,
-        ...(useSchema
-          ? {
-              response_format: {
-                type: 'json_schema',
-                json_schema: {
-                  name: 'battle_meme_output',
-                  description: '社交斗图嘴替 Agent 的结构化输出',
-                  schema: outputSchema,
-                  strict: true,
-                },
+    return requestProviderChatCompletion(provider, {
+      ...requestBase,
+      ...(provider.id === 'ark'
+        ? {
+            thinking: {
+              type: 'disabled',
+            },
+          }
+        : {}),
+      ...(useSchema
+        ? {
+            response_format: {
+              type: 'json_schema',
+              json_schema: {
+                name: 'battle_meme_output',
+                description: '社交斗图嘴替 Agent 的结构化输出',
+                schema: outputSchema,
+                strict: true,
               },
-            }
-          : {}),
-      }),
+            },
+          }
+        : {}),
     })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error('ark_battle_request_failed ' + response.status + ' ' + errorText)
-    }
-
-    return response.json()
   }
 
   let data
@@ -2453,13 +2821,46 @@ async function generateBattleWithArk(payload, fallback) {
   }
 }
 
-app.get('/api/health', (_request, response) => {
+app.get('/api/meme-preview/:key', async (request, response) => {
+  try {
+    const key = String(request.params.key || '').trim()
+    if (!key) {
+      response.status(400).json({ ok: false, error: 'missing_key' })
+      return
+    }
+
+    const buffer = await renderMemePreviewBuffer(key)
+    if (!buffer) {
+      response.status(404).json({ ok: false, error: 'preview_not_found' })
+      return
+    }
+
+    response.setHeader('Content-Type', 'image/png')
+    response.setHeader('Cache-Control', 'public, max-age=86400')
+    response.send(buffer)
+  } catch (error) {
+    console.error('meme preview failed', error)
+    response.status(500).json({ ok: false, error: 'preview_failed' })
+  }
+})
+
+app.get('/api/health', async (request, response) => {
+  const providerId = getRequestedProviderId(request.query.providerId)
+  const provider = getProviderConfig(providerId, request.query.modelId)
+  let probe = providerProbes[provider.id]
+
+  if (!probe?.checked) {
+    probe = await probeProviderAccess(provider.id, provider.model)
+  }
+
   response.json({
     ok: true,
-    mode: hasArk && arkProbe.ok ? 'ark' : 'fallback',
-    model: hasArk ? model : undefined,
-    message: arkProbe.message,
-    supportsImageInput,
+    mode: probe.ok ? provider.id : 'fallback',
+    providerId: provider.id,
+    providerLabel: provider.label,
+    model: provider.model,
+    message: probe.message,
+    supportsImageInput: supportsImageForProvider(provider),
   })
 })
 
@@ -2483,15 +2884,19 @@ app.get('/api/agent/skills', (_request, response) => {
 
 app.post('/api/generate', async (request, response) => {
   const payload = request.body ?? {}
+  const provider = getProviderConfig(payload.providerId, payload.modelId)
   const fallback = buildFallbackExperience(payload)
 
   try {
-    const experience = hasArk ? await generateWithArk(payload, fallback) : fallback
+    const experience = isProviderConfigured(provider) ? await generateWithArk(payload, fallback, provider) : fallback
 
     response.json({
       ok: true,
-      mode: hasArk ? 'ark' : 'fallback',
-      supportsImageInput,
+      mode: isProviderConfigured(provider) ? provider.id : 'fallback',
+      providerId: provider.id,
+      providerLabel: provider.label,
+      model: provider.model,
+      supportsImageInput: supportsImageForProvider(provider),
       experience,
     })
   } catch (error) {
@@ -2507,29 +2912,67 @@ app.post('/api/generate', async (request, response) => {
 
 app.post('/api/battle/analyze-input', async (request, response) => {
   const payload = request.body ?? {}
+  const provider = getProviderConfig(payload.providerId, payload.modelId)
   const ocrHints = payload.imageDataUrl ? await runLocalOcr(payload.imageDataUrl, payload.imageName || 'upload.png') : null
   const fallback = buildFallbackInputAnalysis(payload, ocrHints)
 
   try {
-    const analysis = hasArk ? await generateInputAnalysisWithArk(payload, fallback, ocrHints) : fallback
+    const analysis = isProviderConfigured(provider)
+      ? await generateInputAnalysisWithArk(payload, fallback, ocrHints, provider)
+      : fallback
+    const shouldTreatAsChatScreenshot =
+      (analysis.inputType === 'chat_screenshot' || ocrHints?.suggestScreenshot) && ocrHints?.lines?.length
     const mergedAnalysis =
-      analysis.inputType === 'chat_screenshot' && ocrHints?.lines?.length
+      shouldTreatAsChatScreenshot
         ? (() => {
-            const ocrTurns = buildConversationTurnsFromOcr(ocrHints.lines)
-            const normalizedTurns =
-              Array.isArray(analysis.conversationTurns) &&
-              analysis.conversationTurns.some((turn) => !looksLikeMetaLine(turn?.text))
-                ? analysis.conversationTurns.filter((turn) => !looksLikeMetaLine(turn?.text))
-                : ocrTurns
+            const blockTurns = buildConversationTurnsFromOcrBlocks(ocrHints?.blocks || [])
+            const candidateLines = [
+              ...(Array.isArray(ocrHints.lines) ? ocrHints.lines : []),
+              ...(Array.isArray(analysis.detectedText) ? analysis.detectedText : []),
+              ...(Array.isArray(analysis.conversationTurns)
+                ? analysis.conversationTurns.map((turn) => turn?.text).filter(Boolean)
+                : []),
+              analysis.lastOpponentMessage,
+              analysis.threadContextSuggestion,
+            ].filter(Boolean)
+
+            const ocrTurns = blockTurns.length
+              ? blockTurns
+              : buildConversationTurnsFromOcr(candidateLines)
+            const normalizedTurns = ocrTurns.length
+              ? ocrTurns
+              : Array.isArray(analysis.conversationTurns)
+                ? analysis.conversationTurns
+                    .map((turn) => ({
+                      speaker:
+                        typeof turn?.speaker === 'string' && turn.speaker.trim()
+                          ? turn.speaker.trim()
+                          : '对方',
+                      text: normalizeConversationText(turn?.text),
+                    }))
+                    .filter((turn) => turn.text && !looksLikeMetaLine(turn.text))
+                : []
             const mergedThreadContext =
-              analysis.threadContextSuggestion && !looksLikeMetaLine(analysis.threadContextSuggestion)
-                ? analysis.threadContextSuggestion
-                : buildThreadContextFromTurns(normalizedTurns) || pickBestOcrMessage(ocrHints.lines) || ''
+              buildThreadContextFromTurns(normalizedTurns) ||
+              pickBestOcrMessage(candidateLines) ||
+              ''
+            const mergedLastOpponentMessage =
+              normalizedTurns[normalizedTurns.length - 1]?.text ||
+              pickBestOcrMessage(candidateLines) ||
+              ''
+            const mergedDetectedText = Array.from(
+              new Set(
+                candidateLines
+                  .map((line) => normalizeConversationText(line))
+                  .filter((line) => line && !looksLikeMetaLine(line)),
+              ),
+            ).slice(0, 8)
 
             return {
               ...analysis,
-              detectedText: analysis.detectedText?.length ? analysis.detectedText : ocrHints.lines.slice(0, 8),
-              lastOpponentMessage: pickBestOcrMessage([analysis.lastOpponentMessage, ...ocrHints.lines]) || '',
+              inputType: 'chat_screenshot',
+              detectedText: mergedDetectedText.length ? mergedDetectedText : ocrHints.lines.slice(0, 8),
+              lastOpponentMessage: mergedLastOpponentMessage,
               threadContextSuggestion: mergedThreadContext,
               conversationTurns: normalizedTurns,
             }
@@ -2538,8 +2981,11 @@ app.post('/api/battle/analyze-input', async (request, response) => {
 
     response.json({
       ok: true,
-      mode: hasArk ? 'ark' : 'fallback',
-      supportsImageInput,
+      mode: isProviderConfigured(provider) ? provider.id : 'fallback',
+      providerId: provider.id,
+      providerLabel: provider.label,
+      model: provider.model,
+      supportsImageInput: supportsImageForProvider(provider),
       analysis: mergedAnalysis,
       ocrHints: ocrHints?.lines || [],
       recommendedTemplates: mergedAnalysis.recommendedTemplateIds.map((templateId) => getMemeTemplate(templateId)),
@@ -2549,7 +2995,10 @@ app.post('/api/battle/analyze-input', async (request, response) => {
     response.json({
       ok: true,
       mode: 'fallback',
-      supportsImageInput,
+      providerId: provider.id,
+      providerLabel: provider.label,
+      model: provider.model,
+      supportsImageInput: supportsImageForProvider(provider),
       analysis: fallback,
       ocrHints: ocrHints?.lines || [],
       recommendedTemplates: fallback.recommendedTemplateIds.map((templateId) => getMemeTemplate(templateId)),
@@ -2560,21 +3009,25 @@ app.post('/api/battle/analyze-input', async (request, response) => {
 
 app.post('/api/battle/generate', async (request, response) => {
   const payload = request.body ?? {}
+  const provider = getProviderConfig(payload.providerId, payload.modelId)
   const fallback = buildFallbackExperience({
     ...payload,
     modeId: payload.modeId || 'deep',
   })
 
   try {
-    const battleOutput = hasArk
-      ? await generateBattleWithArk(payload, fallback)
+    const battleOutput = isProviderConfigured(provider)
+      ? await generateBattleWithArk(payload, fallback, provider)
       : buildFallbackBattleOutput(payload, fallback)
     const template = getMemeTemplate(battleOutput.memeTemplateId)
 
     response.json({
       ok: true,
-      mode: hasArk ? 'ark' : 'fallback',
-      supportsImageInput,
+      mode: isProviderConfigured(provider) ? provider.id : 'fallback',
+      providerId: provider.id,
+      providerLabel: provider.label,
+      model: provider.model,
+      supportsImageInput: supportsImageForProvider(provider),
       experience: battleOutput,
       analysis: normalizeInputAnalysis(payload.inputAnalysis, buildFallbackInputAnalysis(payload)),
       battle: {
@@ -2587,6 +3040,7 @@ app.post('/api/battle/generate', async (request, response) => {
         memeTemplate: template,
         memeTemplateReason: battleOutput.memeTemplateReason,
         memeGeneratorTemplate: getMemeGeneratorTemplate(battleOutput.memeGeneratorKey),
+        renderedMemeDataUrl: null,
       },
     })
   } catch (error) {
@@ -2599,7 +3053,10 @@ app.post('/api/battle/generate', async (request, response) => {
     response.json({
       ok: true,
       mode: 'fallback',
-      supportsImageInput,
+      providerId: provider.id,
+      providerLabel: provider.label,
+      model: provider.model,
+      supportsImageInput: supportsImageForProvider(provider),
       experience: battleOutput,
       analysis: normalizeInputAnalysis(payload.inputAnalysis, buildFallbackInputAnalysis(payload)),
       battle: {
@@ -2612,6 +3069,7 @@ app.post('/api/battle/generate', async (request, response) => {
         memeTemplate: template,
         memeTemplateReason: battleOutput.memeTemplateReason,
         memeGeneratorTemplate: getMemeGeneratorTemplate(battleOutput.memeGeneratorKey),
+        renderedMemeDataUrl: null,
       },
       warning: 'battle_generation_failed_fallback_returned',
       debugReason,
@@ -2621,6 +3079,7 @@ app.post('/api/battle/generate', async (request, response) => {
 
 app.post('/api/battle/follow-up', async (request, response) => {
   const payload = request.body ?? {}
+  const provider = getProviderConfig(payload.providerId, payload.modelId)
   const chatHistory = Array.isArray(payload.chatHistory) ? payload.chatHistory : []
   const battleStyleName = payload.battleStyleName || '阴阳怪气'
   const relationshipId = payload.relationshipId || 'crush'
@@ -2636,7 +3095,7 @@ app.post('/api/battle/follow-up', async (request, response) => {
     ? [...chatHistory, { role: 'incoming', speaker: '对方', text: opponentMessage }]
     : chatHistory
 
-  if (hasArk) {
+  if (isProviderConfigured(provider)) {
     try {
       const outputSchema = {
         type: 'object',
@@ -2688,7 +3147,7 @@ app.post('/api/battle/follow-up', async (request, response) => {
       ]
 
       const requestBase = {
-        model,
+        model: provider.model,
         messages: [
           {
             role: 'system',
@@ -2696,35 +3155,23 @@ app.post('/api/battle/follow-up', async (request, response) => {
           },
           { role: 'user', content: userContent },
         ],
-        thinking: { type: 'disabled' },
         max_tokens: 800,
         temperature: 0.9,
       }
 
       async function requestArk(useSchema) {
-        const resp = await fetch(arkBaseUrl + '/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: 'Bearer ' + process.env.ARK_API_KEY,
-          },
-          body: JSON.stringify({
-            ...requestBase,
-            ...(useSchema
-              ? {
-                  response_format: {
-                    type: 'json_schema',
-                    json_schema: { name: 'follow_up_chat', schema: outputSchema, strict: true },
-                  },
-                }
-              : {}),
-          }),
+        return requestProviderChatCompletion(provider, {
+          ...requestBase,
+          ...(provider.id === 'ark' ? { thinking: { type: 'disabled' } } : {}),
+          ...(useSchema
+            ? {
+                response_format: {
+                  type: 'json_schema',
+                  json_schema: { name: 'follow_up_chat', schema: outputSchema, strict: true },
+                },
+              }
+            : {}),
         })
-        if (!resp.ok) {
-          const errorText = await resp.text()
-          throw new Error(`ark_followup_failed ${resp.status} ${errorText}`)
-        }
-        return resp.json()
       }
 
       let data
@@ -2793,8 +3240,13 @@ app.post('/api/battle/follow-up', async (request, response) => {
 
 app.listen(port, host, () => {
   console.log(`mirror-demo-api listening on http://${host}:${port}`)
-  console.log(`mode=${hasArk ? 'ark-configured' : 'fallback'} model=${hasArk ? model : 'local-fallback'}`)
-  void probeArkAccess().then((result) => {
-    console.log(`ark_probe=${result.ok ? 'ok' : 'fallback'} message=${result.message}`)
+  const defaultProvider = getProviderConfig()
+  console.log(
+    `mode=${isProviderConfigured(defaultProvider) ? `${defaultProvider.id}-configured` : 'fallback'} model=${
+      isProviderConfigured(defaultProvider) ? defaultProvider.model : 'local-fallback'
+    }`,
+  )
+  void probeProviderAccess(defaultProvider.id, defaultProvider.model).then((result) => {
+    console.log(`${defaultProvider.id}_probe=${result.ok ? 'ok' : 'fallback'} message=${result.message}`)
   })
 })
